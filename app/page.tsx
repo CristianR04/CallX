@@ -8,6 +8,7 @@ export interface Evento {
   empleadoId: string;
   nombre: string;
   hora: string;
+  fecha: string;
   tipo: string;
   foto?: string;
 }

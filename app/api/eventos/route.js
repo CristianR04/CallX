@@ -18,26 +18,26 @@ export async function GET(request) {
 
     // Configurar rango de fechas según el periodo solicitado
     switch (periodo) {
-      case 'año':
-        // Desde el 1 de enero del año actual hasta hoy
-        startTime = `${today.getFullYear()}-01-01T00:00:00`;
-        endTime = `${today.toISOString().split("T")[0]}T23:59:59`;
-        break;
-      
-      case 'mes':
-        // Desde el día 1 del mes actual hasta hoy
-        const primerDiaMes = new Date(today.getFullYear(), today.getMonth(), 1);
-        startTime = `${primerDiaMes.toISOString().split("T")[0]}T00:00:00`;
-        endTime = `${today.toISOString().split("T")[0]}T23:59:59`;
-        break;
-      
-      case 'hoy':
-      default:
-        // Solo hoy
-        startTime = `${today.toISOString().split("T")[0]}T00:00:00`;
-        endTime = `${today.toISOString().split("T")[0]}T23:59:59`;
-        break;
+    case 'año': {
+      const inicioAno = new Date(today.getFullYear(), 0, 1);
+      startTime = `${inicioAno.toISOString().split("T")[0]}T00:00:00`;
+      endTime = `${today.toISOString().split("T")[0]}T23:59:59`;
+      break;
     }
+
+    case 'mes': {
+      const inicioMes = new Date(today.getFullYear(), today.getMonth(), 1);
+      startTime = `${inicioMes.toISOString().split("T")[0]}T00:00:00`;
+      endTime = `${today.toISOString().split("T")[0]}T23:59:59`;
+      break;
+    }
+
+    case 'hoy':
+    default: {
+      startTime = `${today.toISOString().split("T")[0]}T00:00:00`;
+      endTime = `${today.toISOString().split("T")[0]}T23:59:59`;
+    }
+  }
 
     const url = `https://${deviceIp}/ISAPI/AccessControl/AcsEvent?format=json`;
 
