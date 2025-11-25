@@ -14,7 +14,7 @@ export default function UsuarioDelete({
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
       <div className="bg-white p-6 rounded-lg shadow-md text-center w-80">
-        <h3 className="text-lg font-semibold">¿Eliminar usuario?</h3>
+        <h3 className="text-lg font-semibold text-black">¿Eliminar usuario?</h3>
         <p className="mt-2 text-gray-600">{usuario.nombre}</p>
 
         <div className="mt-4 flex justify-center gap-3">
@@ -27,7 +27,7 @@ export default function UsuarioDelete({
 
           <button
             onClick={onCancel}
-            className="bg-gray-300 px-4 py-2 rounded-md hover:bg-gray-400"
+            className="bg-gray-300 px-4 py-2 rounded-md text-black hover:bg-gray-400"
           >
             Cancelar
           </button>

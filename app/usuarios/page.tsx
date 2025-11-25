@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { Usuario, usuariosIniciales } from "@/lib/mock";
-// import UsuariosList from "@/components/CRUD/UsuariosList";
-// import UsuarioCreate from "@/components/CRUD/UsuarioCreate";
-// import UsuarioEdit from "@/components/CRUD/UsuarioEdit";
-// import UsuarioDelete from "@/components/CRUD/UsuarioDelete";
+import UsuariosList from "@/components/CRUD/UsuarioList";
+import UsuarioCreate from "@/components/CRUD/UsuarioCreate";
+import UsuarioEdit from "@/components/CRUD/UsuarioEdit";
+import UsuarioDelete from "@/components/CRUD/UsuarioDelete";
 
 export default function UsuariosPage() {
   const [usuarios, setUsuarios] = useState<Usuario[]>(usuariosIniciales);

@@ -29,7 +29,7 @@ export default function UsuarioEdit({ usuario, onEdit, onCancel }: {
           name={field}
           value={(form as any)[field]}
           onChange={handleChange}
-          className="border p-2 rounded-md focus:ring-2 focus:ring-blue-400"
+          className="border border-gray-600 placeholder-gray-300 text-black p-2 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
       ))}
 
@@ -41,7 +41,7 @@ export default function UsuarioEdit({ usuario, onEdit, onCancel }: {
         <button
           type="button"
           onClick={onCancel}
-          className="bg-gray-300 py-2 px-4 rounded-md hover:bg-gray-400"
+          className="bg-gray-300 py-2 px-4 text-black rounded-md hover:bg-gray-400"
         >
           Cancelar
         </button>

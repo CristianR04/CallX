@@ -15,8 +15,8 @@ export default function UsuariosList({
         <thead>
           <tr className="bg-gray-100 text-gray-700 text-left">
             <th className="p-3">Foto</th>
-            <th className="p-3">Nombre</th>
             <th className="p-3">Empleado ID</th>
+            <th className="p-3">Nombre</th>
             <th className="p-3">Hora</th>
             <th className="p-3">Fecha</th>
             <th className="p-3">Tipo</th>
@@ -26,12 +26,12 @@ export default function UsuariosList({
 
         <tbody>
           {usuarios.map((u) => (
-            <tr key={u.id} className="border-b last:border-none hover:bg-gray-50">
+            <tr key={u.id} className="border-b text-black last:border-none hover:bg-gray-50">
               <td className="p-3">
                 <img src={u.foto} className="w-10 h-10 rounded-full" />
               </td>
-              <td className="p-3">{u.nombre}</td>
               <td className="p-3">{u.empleadoId}</td>
+              <td className="p-3">{u.nombre}</td>
               <td className="p-3">{u.hora}</td>
               <td className="p-3">{u.fecha}</td>
               <td className="p-3">{u.tipo}</td>
