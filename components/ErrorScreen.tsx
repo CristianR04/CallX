@@ -18,8 +18,7 @@ export function ErrorScreen({ error, onRetry }: ErrorScreenProps) {
         <p className="text-gray-600 mb-6">{error}</p>
         <button 
           onClick={onRetry}
-          className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition-colors"
-        >
+          className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition-colors">
           Reintentar
         </button>
       </div>

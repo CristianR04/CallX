@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Evento } from "@/app/page";
+import { Evento } from "@/app/eventos/page";
 import { Pagination } from "@/components/Pagination";
 
 interface TablaEventosProps {
@@ -14,31 +14,55 @@ export function EventosTable({ eventos, isLoading }: TablaEventosProps) {
   const [paginatedEventos, setPaginatedEventos] = useState<Evento[]>([]);
   const totalPages = Math.ceil(eventos.length / ITEMS_PER_PAGE);
 
-  // Recalcular paginación cada vez que llegan nuevos eventos
   useEffect(() => {
-    setCurrentPage(1); // Reiniciar a página 1
+    setCurrentPage(1);
   }, [eventos]);
 
-  // Cortar los eventos según la página seleccionada
   useEffect(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
     setPaginatedEventos(eventos.slice(startIndex, endIndex));
   }, [currentPage, eventos]);
 
+  const formatFecha = (fechaStr: string) => {
+    if (!fechaStr) return '-';
+    try {
+      if (fechaStr.includes('T')) {
+        const fecha = new Date(fechaStr);
+        if (isNaN(fecha.getTime())) return '-';
+        const day = fecha.getDate().toString().padStart(2, '0');
+        const month = (fecha.getMonth() + 1).toString().padStart(2, '0');
+        const year = fecha.getFullYear();
+        return `${day}-${month}-${year}`;
+      }
+      
+      if (fechaStr.includes('-') && fechaStr.length === 10) {
+        const [year, month, day] = fechaStr.split('-');
+        return `${day}-${month}-${year}`;
+      }
+      
+      const fecha = new Date(fechaStr);
+      if (isNaN(fecha.getTime())) return '-';
+      const day = fecha.getDate().toString().padStart(2, '0');
+      const month = (fecha.getMonth() + 1).toString().padStart(2, '0');
+      const year = fecha.getFullYear();
+      return `${day}-${month}-${year}`;
+    } catch (error) {
+      return '-';
+    }
+  };
+
   return (
     <div className="overflow-x-auto rounded-lg shadow-lg bg-white">
-
-      {/* Tabla */}
       <table className="min-w-full divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">ID</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Nombre</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Hora</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Fecha</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Tipo</th>
-            {/* <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Foto</th> */}
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Hora Entrada</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Hora Salida</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Campaña</th>
           </tr>
         </thead>
 
@@ -54,51 +78,37 @@ export function EventosTable({ eventos, isLoading }: TablaEventosProps) {
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedEventos.map((evento, index) => (
               <tr key={index} className="hover:bg-gray-50">
-                {/* Documento */}
                 <td className="px-6 py-4 whitespace-nowrap text-gray-700">
                   {evento.empleadoId}
                 </td>
-                {/* Nombre */}
+                
                 <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-800">
                   {evento.nombre}
                 </td>
                 
-                {/* Hora */}
                 <td className="px-6 py-4 whitespace-nowrap text-gray-700">
-                  {new Date(evento.hora).toLocaleTimeString("es-CO")}
-                </td>
-                
-                {/* Fecha */}
-                <td className="px-6 py-4 whitespace-nowrap text-gray-700">
-                  {evento.fecha}
+                  {formatFecha(evento.fecha)}
                 </td>
 
-                {/* Tipo */}
+                <td className="px-6 py-4 whitespace-nowrap text-gray-700">
+                  {evento.horaEntrada || '-'}
+                </td>
+
+                <td className="px-6 py-4 whitespace-nowrap text-gray-700">
+                  {evento.horaSalida || '-'}
+                </td>
+
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                    {evento.tipo}
+                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                    {evento.campaña || 'Sin grupo'}
                   </span>
                 </td>
-                {/* Foto */}
-                {/* <td className="px-6 py-4 whitespace-nowrap">
-                  {evento.foto ? (
-                    <img
-                      src={evento.foto}
-                      alt="Foto acceso"
-                      className="w-12 h-12 rounded-lg object-cover shadow-sm border"
-                    />
-                  ) : (
-                    <span className="text-gray-400 text-sm">Sin foto</span>
-                  )}
-                </td> */}
-
               </tr>
             ))}
           </tbody>
         )}
       </table>
 
-      {/* PAGINACIÓN */}
       {!isLoading && totalPages > 1 && (
         <div className="mt-4 flex justify-center">
           <Pagination
