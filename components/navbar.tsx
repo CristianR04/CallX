@@ -67,7 +67,7 @@ export default function Navbar() {
         >
 
           <Link
-            href="#"
+            href="/auth/registrar"
             className="block px-4 py-2 hover:bg-gray-100 transition"
             onClick={() => setOpen(false)}
           >

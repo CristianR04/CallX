@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import UsuariosList from "@/components/CRUD/UsuarioList";
-import UsuarioCreate from "@/components/CRUD/UsuarioCreate";
 import UsuarioEdit from "@/components/CRUD/UsuarioEdit";
 import UsuarioDelete from "@/components/CRUD/UsuarioDelete";
 import Navbar from "@/components/navbar";
+import UsuarioCreateModal from "@/components/CRUD/UsuarioCreate";
 
 // Interfaces TypeScript
 interface Usuario {
@@ -62,6 +62,7 @@ export default function UsuariosPage() {
   const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
   const [usuarioAEliminar, setUsuarioAEliminar] = useState<Usuario | null>(null);
   const [departamentoFiltro, setDepartamentoFiltro] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
 
   // Función para eliminar duplicados
   const eliminarDuplicados = (listaUsuarios: Usuario[]): Usuario[] => {
@@ -310,8 +311,8 @@ export default function UsuariosPage() {
       <Navbar />
 
       <div className="p-4 pt-20">
-        {/* Header rediseñado con paleta equilibrada */}
-        <div className="mb-4 p-4 bg-gradient-to-r from-slate-700 via-emerald-700 to-slate-800 rounded-lg shadow-lg border border-slate-600/30 mx-20">
+        {/* Header rediseñado con tonos grises más claros */}
+        <div className="mb-4 p-4 bg-gradient-to-r from-slate-600 via-emerald-600 to-slate-700 rounded-lg shadow-lg border border-slate-500/30">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-3">
             
             {/* Sección izquierda: Título y estadísticas */}
@@ -322,7 +323,7 @@ export default function UsuariosPage() {
                 {/* Indicador de filtro activo */}
                 {departamentoFiltro && (
                   <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 bg-emerald-600/80 text-white text-xs rounded-full flex items-center gap-1">
+                    <span className="px-3 py-1 bg-emerald-700 text-white text-xs rounded-full flex items-center gap-1">
                       <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
                         <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
                       </svg>
@@ -330,7 +331,7 @@ export default function UsuariosPage() {
                     </span>
                     <button
                       onClick={limpiarFiltro}
-                      className="text-xs text-slate-300 hover:text-white transition-colors flex items-center gap-1"
+                      className="text-xs text-slate-200 hover:text-white transition-colors flex items-center gap-1"
                     >
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -342,29 +343,24 @@ export default function UsuariosPage() {
               </div>
               
               <div className="flex flex-wrap gap-1.5 text-xs">
-                <span className="inline-flex items-center bg-emerald-800/60 text-emerald-100 px-2.5 py-1 rounded-lg">
+                <span className="inline-flex items-center bg-emerald-800/70 text-emerald-100 px-2.5 py-1 rounded-lg">
                   <span className="w-2 h-2 bg-emerald-300 rounded-full mr-1.5"></span>
                   {usuariosFiltrados.length} {departamentoFiltro ? `en ${departamentoFiltro}` : 'Totales'}
                 </span>
-                <span className="inline-flex items-center bg-blue-800/60 text-blue-100 px-2.5 py-1 rounded-lg">
+                <span className="inline-flex items-center bg-blue-800/70 text-blue-100 px-2.5 py-1 rounded-lg">
                   <span className="w-2 h-2 bg-blue-300 rounded-full mr-1.5"></span>
                   {usuariosFiltrados.filter(u => u.fotoPath && u.fotoPath !== u.numeroEmpleado).length} Con foto
                 </span>
-                <span className="inline-flex items-center bg-purple-800/60 text-purple-100 px-2.5 py-1 rounded-lg">
+                <span className="inline-flex items-center bg-purple-800/70 text-purple-100 px-2.5 py-1 rounded-lg">
                   <span className="w-2 h-2 bg-purple-300 rounded-full mr-1.5"></span>
                   {estadisticas.dispositivosConectados}/{estadisticas.totalDispositivos} disp.
                 </span>
               </div>
             </div>
-            
-            {/* Sección derecha: Botón de agregar usuario */}
-            <div className="flex-shrink-0 mt-2 md:mt-0">
-              <UsuarioCreate onCreate={crearUsuario} />
-            </div>
           </div>
           
           {/* Lista horizontal de departamentos como filtros */}
-          <div className="mt-3 pt-3 border-t border-slate-600/50">
+          <div className="mt-3 pt-3 border-t border-slate-500/50">
             <div className="flex items-center text-sm font-medium mb-2 text-slate-200">
               <svg className="w-4 h-4 mr-2 text-emerald-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
                 <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
@@ -436,6 +432,9 @@ export default function UsuariosPage() {
           </div>
         </div>
 
+        {/* Botón flotante de crear usuario */}
+        <UsuarioCreateModal onCreate={crearUsuario} />
+
         {/* Editar */}
         {usuarioEditando && (
           <div className="mb-4">
@@ -456,12 +455,12 @@ export default function UsuariosPage() {
           />
         </div>
 
-        {/* Eliminar */}
+        {/* Eliminar
         <UsuarioDelete
           usuario={usuarioAEliminar}
           onCancel={() => setUsuarioAEliminar(null)}
           onConfirm={eliminarUsuario}
-        />
+        /> */}
       </div>
     </>
   );

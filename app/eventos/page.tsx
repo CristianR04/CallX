@@ -11,6 +11,9 @@ export interface Evento {
   fecha: string;
   horaEntrada?: string;
   horaSalida?: string;
+  horaSalidaAlmuerzo?: string;     // AÑADIR
+  horaEntradaAlmuerzo?: string;    // AÑADIR
+  duracionAlmuerzo?: string;       // AÑADIR
   campaña?: string;
   tipo?: string;
   foto?: string;
@@ -24,9 +27,9 @@ export default function HomePage() {
   const [fechaInicio, setFechaInicio] = useState<string>('');
   const [fechaFin, setFechaFin] = useState<string>('');
 
-  // Procesar eventos agrupados - CON DEBUG
+  // Procesar eventos agrupados - VERSIÓN CON ALMUERZOS
   const procesarEventosAgrupados = (eventos: any[]): Evento[] => {
-    console.log('🔄 Procesando eventos para vista:', eventos.length, 'eventos');
+    console.log('🔄 Procesando eventos con almuerzos:', eventos.length, 'eventos');
 
     const eventosAgrupados: { [key: string]: Evento } = {};
 
@@ -41,25 +44,29 @@ export default function HomePage() {
           campaña: evento.campaña || 'Sin grupo',
           horaEntrada: '',
           horaSalida: '',
+          // ¡AÑADE ESTOS CAMPOS!
+          horaSalidaAlmuerzo: evento.horaSalidaAlmuerzo || '',
+          horaEntradaAlmuerzo: evento.horaEntradaAlmuerzo || '',
+          duracionAlmuerzo: evento.duracionAlmuerzo || '',
           dispositivo: evento.dispositivo || 'Desconocido',
           foto: evento.foto || '',
           tipo: evento.tipo || 'Registro'
         };
       }
 
-      // DEBUG: Mostrar formato original de algunos eventos
-      if (index < 3) {
-        console.log(`🔍 Evento ${index + 1} desde BD:`, {
+      // DEBUG: Mostrar datos de almuerzo
+      if (index < 2 && (evento.horaSalidaAlmuerzo || evento.horaEntradaAlmuerzo)) {
+        console.log(`🍽️ Evento ${index + 1} tiene almuerzo:`, {
           empleadoId: evento.empleadoId,
-          horaEntradaBD: evento.horaEntrada, // ← Esto viene de la BD
-          horaSalidaBD: evento.horaSalida,   // ← Esto viene de la BD
-          tipo: evento.tipo
+          salidaAlmuerzo: evento.horaSalidaAlmuerzo,
+          entradaAlmuerzo: evento.horaEntradaAlmuerzo,
+          duracion: evento.duracionAlmuerzo
         });
       }
 
       // FUNCIÓN QUE MANTIENE SEGUNDOS
       const formatearHora = (hora: string) => {
-        if (!hora) return '';
+        if (!hora || hora === '--:--') return '';
 
         // Si ya tiene formato completo con segundos, mantenerlo
         if (hora.match(/^\d{1,2}:\d{2}:\d{2}$/)) {
@@ -85,6 +92,17 @@ export default function HomePage() {
         eventosAgrupados[clave].horaSalida = horaSalidaFormateada;
       }
 
+      // Mantener los datos de almuerzo (ya vienen del endpoint)
+      if (evento.horaSalidaAlmuerzo && evento.horaSalidaAlmuerzo !== '--:--') {
+        eventosAgrupados[clave].horaSalidaAlmuerzo = evento.horaSalidaAlmuerzo;
+      }
+      if (evento.horaEntradaAlmuerzo && evento.horaEntradaAlmuerzo !== '--:--') {
+        eventosAgrupados[clave].horaEntradaAlmuerzo = evento.horaEntradaAlmuerzo;
+      }
+      if (evento.duracionAlmuerzo) {
+        eventosAgrupados[clave].duracionAlmuerzo = evento.duracionAlmuerzo;
+      }
+
       // Actualizar tipo basado en horas disponibles
       if (eventosAgrupados[clave].horaEntrada && eventosAgrupados[clave].horaSalida) {
         eventosAgrupados[clave].tipo = 'Entrada/Salida';
@@ -95,15 +113,18 @@ export default function HomePage() {
       }
     });
 
-    // DEBUG: Mostrar resultado final
+    // DEBUG: Mostrar resultado final CON ALMUERZOS
     const resultado = Object.values(eventosAgrupados);
-    console.log('✅ Eventos procesados para vista:', resultado.length);
+    console.log('✅ Eventos procesados CON ALMUERZOS:', resultado.length);
 
     if (resultado.length > 0) {
-      console.log('👤 Primer evento procesado:', {
+      console.log('👤 Primer evento procesado (con almuerzo):', {
         empleadoId: resultado[0].empleadoId,
-        horaEntrada: resultado[0].horaEntrada, // ← Esto se mostrará en la tabla
-        horaSalida: resultado[0].horaSalida,   // ← Esto se mostrará en la tabla
+        horaEntrada: resultado[0].horaEntrada,
+        horaSalida: resultado[0].horaSalida,
+        horaSalidaAlmuerzo: resultado[0].horaSalidaAlmuerzo, // ← ¡Nuevo!
+        horaEntradaAlmuerzo: resultado[0].horaEntradaAlmuerzo, // ← ¡Nuevo!
+        duracionAlmuerzo: resultado[0].duracionAlmuerzo, // ← ¡Nuevo!
         tipo: resultado[0].tipo
       });
     }
@@ -176,7 +197,7 @@ export default function HomePage() {
       const response = await fetch('/api/eventos/guardar-eventos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(eventosParaBD),
+        body: JSON.stringify({ eventos: eventosParaBD }),
       });
 
       const result = await response.json();
@@ -276,7 +297,11 @@ export default function HomePage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(eventosParaBD),
+
           });
+
+          console.log("EVENTOS ENVIADOS A BD:", eventos);
+
 
           const saveResult = await saveResponse.json();
 
@@ -298,7 +323,7 @@ export default function HomePage() {
         console.error('❌ Error en sincronización automática:', error);
       }
     };
-    
+
     // Sincronizar inmediatamente al cargar
     sincronizarYActualizar();
 
