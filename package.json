@@ -36,6 +36,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "baseline-browser-mapping": "^2.9.4",
     "drizzle-kit": "^0.31.7",
     "drizzle-orm": "^0.44.7",
     "eslint": "^9",
