@@ -88,7 +88,7 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
       };
 
       // Enviar a Hikvision
-      const response = await fetch('/api/hikvision/users', {
+      const response = await fetch('/api/hikvision/users/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

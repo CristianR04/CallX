@@ -1,237 +1,338 @@
-// // app/api/hikvision/users/delete/route.js
-// import { NextResponse } from 'next/server';
-// import DigestFetch from 'digest-fetch';
+// app/api/hikvision/users/delete/route.js
+import { NextResponse } from 'next/server';
 
-// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+// CONFIGURACIÓN DE DISPOSITIVOS
+const DEVICES = [
+  { 
+    ip: process.env.HIKVISION_IP_1 || "172.31.0.165", 
+    username: process.env.HIKVISION_USERNAME_1 || "admin", 
+    password: process.env.HIKVISION_PASSWORD_1 || "Tattered3483",
+    port: 443,
+    protocol: 'https'
+  },
+  // { 
+  //   ip: process.env.HIKVISION_IP_2 || "172.31.0.164", 
+  //   username: process.env.HIKVISION_USERNAME_2 || "admin", 
+  //   password: process.env.HIKVISION_PASSWORD_2 || "Tattered3483",
+  //   port: 80,
+  //   protocol: 'http'
+  // }
+].filter(device => device.ip);
 
-// const DEVICES = [
-//   { ip: "172.31.0.165", username: "admin", password: "Tattered3483" },
-//   { ip: "172.31.0.164", username: "admin", password: "Tattered3483" }
-// ];
+// VALIDADOR DE SEGURIDAD
+class SecurityValidator {
+  static validateDeleteRequest(employeeNo, requestBody) {
+    if (!requestBody || typeof requestBody !== 'object') {
+      return { valid: false, error: "Estructura de solicitud inválida" };
+    }
 
-// // Función auxiliar para eliminar usuario en un dispositivo
-// async function deleteUserFromDevice(device, employeeNo) {
-//   console.log(`🔄 ELIMINANDO USUARIO ${employeeNo} DEL DISPOSITIVO: ${device.ip}`);
+    if (Array.isArray(requestBody)) {
+      return { valid: false, error: "No se permiten arrays" };
+    }
+
+    const keys = Object.keys(requestBody);
+    if (keys.length !== 1 || !keys.includes('employeeNo')) {
+      return { 
+        valid: false, 
+        error: "Solo se permite el campo 'employeeNo'",
+        code: "INVALID_BODY_STRUCTURE"
+      };
+    }
+
+    if (employeeNo === undefined || employeeNo === null) {
+      return { valid: false, error: "employeeNo es requerido" };
+    }
+
+    const type = typeof employeeNo;
+    if (type !== 'string' && type !== 'number') {
+      return { 
+        valid: false, 
+        error: "employeeNo debe ser string o number",
+        code: "INVALID_TYPE"
+      };
+    }
+
+    const employeeStr = employeeNo.toString().trim();
+    
+    if (employeeStr.length === 0) {
+      return { valid: false, error: "employeeNo no puede estar vacío" };
+    }
+
+    if (!/^\d+$/.test(employeeStr)) {
+      return { 
+        valid: false, 
+        error: "employeeNo debe contener solo números",
+        code: "INVALID_FORMAT"
+      };
+    }
+
+    return { valid: true, employeeNo: employeeStr };
+  }
+
+  static logDeleteAttempt(employeeNo, ip, userAgent) {
+    const timestamp = new Date().toISOString();
+    console.log(`🔐 LOG ELIMINACIÓN - ${timestamp}:
+      • EmployeeNo: ${employeeNo}
+      • IP: ${ip || 'N/A'}
+      • User-Agent: ${userAgent?.substring(0, 50) || 'N/A'}
+      • Dispositivos: ${DEVICES.map(d => `${d.protocol}://${d.ip}:${d.port}`).join(', ')}
+    `);
+  }
+}
+
+// FUNCIÓN DE ELIMINACIÓN
+async function deleteUserFromDevice(device, employeeNo) {
+  console.log(`🔄 Eliminando usuario ${employeeNo} del dispositivo: ${device.protocol}://${device.ip}:${device.port}`);
   
-//   try {
-//     const client = new DigestFetch(device.username, device.password, {
-//       disableRetry: false,
-//       algorithm: 'MD5'
-//     });
+  try {
+    const DigestFetch = (await import('digest-fetch')).default;
+    const client = new DigestFetch(device.username, device.password, {
+      disableRetry: false,
+      algorithm: 'MD5'
+    });
 
-//     // FORMATO 1: Basado en la documentación común de Hikvision
-//     const payload1 = {
-//       UserInfoDelCond: {
-//         EmployeeNoList: [employeeNo.toString()]
-//       }
-//     };
+    // Deshabilitar verificación SSL para HTTPS (solo desarrollo)
+    const originalRejectUnauthorized = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    if (device.protocol === 'https') {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    }
 
-//     // FORMATO 2: Alternativo (menos común)
-//     const payload2 = {
-//       UserInfoDelCond: {
-//         EmployeeNoList: employeeNo.toString()
-//       }
-//     };
+    // Formatos de API para Hikvision
+    const formats = [
+      {
+        method: 'PUT',
+        url: `${device.protocol}://${device.ip}:${device.port}/ISAPI/AccessControl/UserInfo/Delete?format=json`,
+        payload: {
+          UserInfoDelCond: {
+            EmployeeNoList: [{ employeeNo: employeeNo.toString() }]
+          }
+        }
+      },
+      {
+        method: 'DELETE',
+        url: `${device.protocol}://${device.ip}:${device.port}/ISAPI/AccessControl/UserInfo/Record/${employeeNo}`,
+        payload: null
+      }
+    ];
 
-//     // Lista de endpoints y métodos a probar
-//     const attempts = [
-//       {
-//         method: 'PUT',
-//         url: `https://${device.ip}/ISAPI/AccessControl/UserInfo/Delete?format=json`,
-//         payload: payload1,
-//         description: 'PUT con formato 1'
-//       },
-//       {
-//         method: 'POST',
-//         url: `https://${device.ip}/ISAPI/AccessControl/UserInfo/Delete?format=json`,
-//         payload: payload1,
-//         description: 'POST con formato 1'
-//       },
-//       {
-//         method: 'PUT',
-//         url: `https://${device.ip}/ISAPI/AccessControl/UserInfo/Delete`,
-//         payload: payload1,
-//         description: 'PUT sin formato'
-//       },
-//       {
-//         method: 'PUT',
-//         url: `https://${device.ip}/ISAPI/AccessControl/UserInfo/Delete?format=json`,
-//         payload: payload2,
-//         description: 'PUT con formato 2'
-//       },
-//       // Intentar con DELETE method (aunque es menos común)
-//       {
-//         method: 'DELETE',
-//         url: `https://${device.ip}/ISAPI/AccessControl/UserInfo/Record/${employeeNo}?format=json`,
-//         payload: null,
-//         description: 'DELETE por ID'
-//       }
-//     ];
-
-//     // Probar cada intento hasta que uno funcione
-//     for (const attempt of attempts) {
-//       console.log(`🔍 Probando: ${attempt.description} - ${attempt.method} ${attempt.url}`);
+    for (const format of formats) {
+      console.log(`🔍 Probando: ${format.method} ${format.url}`);
       
-//       const options = {
-//         method: attempt.method,
-//         headers: { 
-//           "Content-Type": "application/json",
-//           "Accept": "application/json"
-//         }
-//       };
+      const options = {
+        method: format.method,
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        signal: AbortSignal.timeout(10000)
+      };
 
-//       // Solo agregar body si no es null
-//       if (attempt.payload) {
-//         options.body = JSON.stringify(attempt.payload);
-//       }
+      if (format.payload) {
+        options.body = JSON.stringify(format.payload);
+      }
 
-//       try {
-//         const response = await client.fetch(attempt.url, options);
-//         const responseText = await response.text();
+      try {
+        const response = await client.fetch(format.url, options);
+        const responseText = await response.text();
         
-//         console.log(`📥 Respuesta de ${device.ip} (${attempt.description}):`, {
-//           status: response.status,
-//           statusText: response.statusText,
-//           bodyPreview: responseText.substring(0, 300)
-//         });
+        console.log(`📥 Respuesta de ${device.ip}:`, {
+          status: response.status,
+          statusText: response.statusText,
+          protocol: device.protocol
+        });
 
-//         // Verificar si la respuesta es HTML
-//         if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
-//           console.log(`❌ HTML recibido, intentando siguiente método...`);
-//           continue;
-//         }
-
-//         // Intentar parsear como JSON
-//         try {
-//           const parsedResponse = JSON.parse(responseText);
+        if (response.status === 200 || response.status === 204) {
+          // Restaurar verificación SSL
+          if (device.protocol === 'https') {
+            process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
+          }
           
-//           // Verificar códigos de éxito de Hikvision
-//           if (response.ok) {
-//             const statusCode = parsedResponse.statusCode || 
-//                              parsedResponse.ResponseStatus?.statusCode ||
-//                              parsedResponse.status;
-            
-//             // Códigos de éxito típicos
-//             if (statusCode === 0 || statusCode === 1 || statusCode === 200) {
-//               return {
-//                 success: true,
-//                 message: "Usuario eliminado exitosamente",
-//                 deviceIp: device.ip,
-//                 method: attempt.method,
-//                 response: parsedResponse
-//               };
-//             } else if (statusCode === 6) {
-//               // Código 6 = Invalid Content - probar siguiente método
-//               console.log(`⚠️ Código 6 (Invalid Content), probando siguiente...`);
-//               continue;
-//             }
-//           }
-//         } catch (jsonError) {
-//           // Si no es JSON pero el status es 200/204, asumir éxito
-//           if (response.status === 200 || response.status === 204) {
-//             return {
-//               success: true,
-//               message: "Usuario eliminado exitosamente",
-//               deviceIp: device.ip,
-//               method: attempt.method,
-//               rawResponse: responseText
-//             };
-//           }
-//         }
-//       } catch (fetchError) {
-//         console.log(`❌ Error en intento ${attempt.description}:`, fetchError.message);
-//         // Continuar con el siguiente intento
-//       }
+          return {
+            success: true,
+            message: "Usuario eliminado exitosamente",
+            deviceIp: device.ip,
+            devicePort: device.port,
+            deviceProtocol: device.protocol,
+            method: format.method
+          };
+        }
+        
+        if (response.status === 404) {
+          // Restaurar verificación SSL
+          if (device.protocol === 'https') {
+            process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
+          }
+          
+          return {
+            success: true,
+            message: "Usuario no encontrado (posiblemente ya fue eliminado)",
+            deviceIp: device.ip,
+            devicePort: device.port,
+            deviceProtocol: device.protocol,
+            method: format.method,
+            warning: true
+          };
+        }
+        
+        // Restaurar verificación SSL antes de continuar
+        if (device.protocol === 'https') {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
+        }
+        
+      } catch (error) {
+        console.log(`❌ Error en formato ${format.method}:`, error.message);
+        
+        // Restaurar verificación SSL si hubo error
+        if (device.protocol === 'https') {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
+        }
+      }
       
-//       // Pequeña pausa entre intentos
-//       await new Promise(resolve => setTimeout(resolve, 300));
-//     }
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
 
-//     // Si llegamos aquí, todos los intentos fallaron
-//     return {
-//       success: false,
-//       error: "Todos los métodos de eliminación fallaron",
-//       deviceIp: device.ip
-//     };
+    return {
+      success: false,
+      error: "Todos los métodos de eliminación fallaron",
+      deviceIp: device.ip,
+      devicePort: device.port,
+      deviceProtocol: device.protocol
+    };
 
-//   } catch (error) {
-//     console.error(`💥 ERROR GENERAL EN ${device.ip}:`, error);
-//     return {
-//       success: false,
-//       error: error.message || 'Error de conexión',
-//       deviceIp: device.ip,
-//       networkError: true
-//     };
-//   }
-// }
+  } catch (error) {
+    console.error(`💥 ERROR GENERAL EN ${device.ip}:`, error);
+    return {
+      success: false,
+      error: error.message || 'Error de conexión',
+      deviceIp: device.ip,
+      devicePort: device.port,
+      deviceProtocol: device.protocol,
+      networkError: true
+    };
+  }
+}
 
-// // POST para eliminar usuarios
-// export async function POST(request) {
-//   try {
-//     const body = await request.json();
-//     const { employeeNo } = body;
+// RATE LIMITER
+class RateLimiter {
+  static requests = new Map();
+  
+  static isRateLimited(ip, employeeNo) {
+    const key = `${ip}_${employeeNo}`;
+    const now = Date.now();
+    const lastRequest = this.requests.get(key);
     
-//     if (!employeeNo) {
-//       return NextResponse.json(
-//         { 
-//           success: false, 
-//           error: "employeeNo es requerido en el cuerpo de la petición" 
-//         },
-//         { status: 400 }
-//       );
-//     }
+    if (lastRequest && (now - lastRequest) < 5000) return true;
+    
+    this.requests.set(key, now);
+    setTimeout(() => this.requests.delete(key), 60000);
+    
+    return false;
+  }
+}
 
-//     console.log(`🔴 SOLICITUD DE ELIMINACIÓN PARA EMPLEADO: ${employeeNo}`);
+// ENDPOINT POST PRINCIPAL
+export async function POST(request) {
+  try {
+    if (request.method !== 'POST') {
+      return NextResponse.json({ success: false, error: 'Método no permitido' }, { status: 405 });
+    }
 
-//     const results = [];
-//     let successCount = 0;
+    const body = await request.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json({ success: false, error: 'Cuerpo de solicitud inválido' }, { status: 400 });
+    }
 
-//     // Eliminar usuario de cada dispositivo
-//     for (const device of DEVICES) {
-//       const result = await deleteUserFromDevice(device, employeeNo);
-//       results.push(result);
+    if (Array.isArray(body)) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'No se permiten eliminaciones masivas. Solo un employeeNo por solicitud.',
+        code: 'BULK_DELETE_NOT_ALLOWED'
+      }, { status: 400 });
+    }
+
+    const { employeeNo } = body;
+    const validation = SecurityValidator.validateDeleteRequest(employeeNo, body);
+    
+    if (!validation.valid) {
+      return NextResponse.json({ 
+        success: false, 
+        error: validation.error,
+        code: validation.code || 'VALIDATION_ERROR'
+      }, { status: 400 });
+    }
+
+    const validatedEmployeeNo = validation.employeeNo;
+    const ip = request.headers.get('x-forwarded-for') || 'N/A';
+    const userAgent = request.headers.get('user-agent');
+    
+    if (RateLimiter.isRateLimited(ip, validatedEmployeeNo)) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Demasiadas solicitudes. Por favor, espere 5 segundos.',
+        code: 'RATE_LIMITED'
+      }, { status: 429 });
+    }
+    
+    SecurityValidator.logDeleteAttempt(validatedEmployeeNo, ip, userAgent);
+    console.log(`🔴 SOLICITUD DE ELIMINACIÓN PARA EMPLEADO: ${validatedEmployeeNo}`);
+
+    // Procesar eliminación
+    const results = [];
+    let successCount = 0;
+
+    for (const device of DEVICES) {
+      console.log(`⚙️ Procesando dispositivo: ${device.protocol}://${device.ip}:${device.port}`);
+      const result = await deleteUserFromDevice(device, validatedEmployeeNo);
+      results.push(result);
       
-//       if (result.success) {
-//         successCount++;
-//       }
+      if (result.success) {
+        successCount++;
+      }
       
-//       // Pequeña pausa entre dispositivos
-//       await new Promise(resolve => setTimeout(resolve, 500));
-//     }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
-//     const allSuccess = successCount === DEVICES.length;
+    const allSuccess = successCount === DEVICES.length;
+    const finalResult = {
+      success: allSuccess,
+      message: allSuccess 
+        ? "Usuario eliminado de todos los dispositivos" 
+        : `Usuario eliminado de ${successCount} de ${DEVICES.length} dispositivos`,
+      results: results,
+      deletedEmployeeNo: validatedEmployeeNo,
+      timestamp: new Date().toISOString()
+    };
+
+    console.log('🎯 RESULTADO FINAL DE ELIMINACIÓN:', finalResult);
     
-//     const finalResult = {
-//       success: allSuccess,
-//       message: allSuccess 
-//         ? "Usuario eliminado de todos los dispositivos" 
-//         : `Usuario eliminado de ${successCount} de ${DEVICES.length} dispositivos`,
-//       results: results,
-//       deletedEmployeeNo: employeeNo
-//     };
+    return NextResponse.json(finalResult);
 
-//     console.log('🎯 RESULTADO FINAL DE ELIMINACIÓN:', finalResult);
-    
-//     return NextResponse.json(finalResult);
+  } catch (error) {
+    console.error('💥 ERROR GENERAL EN ENDPOINT:', error);
+    return NextResponse.json({ success: false, error: 'Error interno del servidor' }, { status: 500 });
+  }
+}
 
-//   } catch (error) {
-//     console.error('💥 ERROR GENERAL EN ENDPOINT:', error);
-//     return NextResponse.json(
-//       { 
-//         success: false, 
-//         error: error.message 
-//       },
-//       { status: 500 }
-//     );
-//   }
-// }
-
-// // GET para verificar si el endpoint funciona
-// export async function GET() {
-//   return NextResponse.json({
-//     success: true,
-//     message: "Endpoint de eliminación de usuarios Hikvision funcionando",
-//     devices: DEVICES.map(d => d.ip),
-//     usage: "POST con { employeeNo: 'numeroEmpleado' }"
-//   });
-// }
+// ENDPOINT GET PARA INFORMACIÓN
+export async function GET() {
+  return NextResponse.json({
+    success: true,
+    message: "Endpoint de eliminación de usuarios Hikvision funcionando",
+    security: {
+      singleUserOnly: true,
+      bulkDeletePrevention: true,
+      rateLimiting: true
+    },
+    devices: DEVICES.map(d => ({ 
+      ip: d.ip, 
+      port: d.port, 
+      protocol: d.protocol,
+      url: `${d.protocol}://${d.ip}:${d.port}`
+    })),
+    usage: {
+      method: "POST",
+      body: "{ employeeNo: 'numeroEmpleado' }",
+      note: "Los dispositivos pueden usar HTTP o HTTPS según configuración"
+    }
+  });
+}

@@ -9,6 +9,7 @@ interface Usuario {
   nombre: string;
   tipoUsuario?: string;
   numeroEmpleado: string;
+  employeeNo?: string;  // <-- AÑADE ESTA LÍNEA
   fechaCreacion?: string;
   fechaModificacion?: string;
   estado?: string;
@@ -21,6 +22,7 @@ interface Usuario {
   fotoDeviceIp?: string;
   groupId?: number;
 }
+
 
 interface UsuarioListProps {
   usuarios: Usuario[];
@@ -84,11 +86,10 @@ function Pagination({ currentPage, totalPages, onPageChange }: PaginationProps) 
               <button
                 key={page}
                 onClick={() => onPageChange(page as number)}
-                className={`px-3.5 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  currentPage === page
-                    ? "bg-emerald-600 text-white shadow-sm"
-                    : "text-gray-700 bg-white border border-gray-300 hover:bg-gray-50"
-                }`}
+                className={`px-3.5 py-1.5 text-sm font-medium rounded-md transition-colors ${currentPage === page
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-gray-700 bg-white border border-gray-300 hover:bg-gray-50"
+                  }`}
               >
                 {page}
               </button>
@@ -133,7 +134,7 @@ export default function UsuarioList({ usuarios, onEdit, onDelete }: UsuarioListP
     if (!departamento || departamento === 'No asignado') {
       return <span className="text-gray-400 text-sm">No asignado</span>;
     }
-    
+
     // Colores sólidos basados en la paleta del header
     const coloresDepartamentos: Record<string, string> = {
       "TI": "bg-purple-100 text-purple-800 border border-purple-200",
@@ -145,9 +146,9 @@ export default function UsuarioList({ usuarios, onEdit, onDelete }: UsuarioListP
       "Campana PARLO": "bg-pink-100 text-pink-800 border border-pink-200",
       "Administrativo": "bg-gray-100 text-gray-800 border border-gray-200"
     };
-    
+
     const estilo = coloresDepartamentos[departamento] || "bg-gray-100 text-gray-800 border border-gray-200";
-    
+
     return (
       <span className={`px-2.5 py-1 ${estilo} rounded-lg text-xs font-medium whitespace-nowrap`}>
         {departamento}
@@ -171,25 +172,26 @@ export default function UsuarioList({ usuarios, onEdit, onDelete }: UsuarioListP
 
           <tbody className="divide-y divide-gray-100">
             {currentUsers.map((u, index) => (
-              <tr 
-                key={u.id || index} 
+              // En la tabla donde muestras los datos:
+              <tr
+                key={u.employeeNo || u.id || index}
                 className="hover:bg-gray-50 transition-colors duration-150"
               >
                 <td className="py-2.5 px-3">
                   <div className="flex justify-center">
-                    <UserAvatar 
-                      employeeNo={u.numeroEmpleado}
+                    <UserAvatar
+                      employeeNo={u.employeeNo || u.numeroEmpleado}
                       nombre={u.nombre}
                       fotoPath={u.fotoPath}
                       dispositivo={u.dispositivo}
-                      size="sm"
+                      
                     />
                   </div>
                 </td>
 
                 <td className="py-2.5 px-3">
                   <div className="font-medium text-gray-900 font-mono text-sm">
-                    {u.numeroEmpleado || u.id || "N/A"}
+                    {u.employeeNo || u.numeroEmpleado || u.id || "N/A"}
                   </div>
                 </td>
 
@@ -234,8 +236,7 @@ export default function UsuarioList({ usuarios, onEdit, onDelete }: UsuarioListP
                     </button>
                   </div>
                 </td>
-              </tr>
-            ))}
+              </tr>))}
           </tbody>
         </table>
 
@@ -255,4 +256,6 @@ export default function UsuarioList({ usuarios, onEdit, onDelete }: UsuarioListP
       )}
     </div>
   );
+  
 }
+

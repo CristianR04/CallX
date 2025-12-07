@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import UsuariosList from "@/components/CRUD/UsuarioList";
+import UsuarioList from "@/components/CRUD/UsuarioList"
 import UsuarioEdit from "@/components/CRUD/UsuarioEdit";
 import UsuarioDelete from "@/components/CRUD/UsuarioDelete";
 import Navbar from "@/components/navbar";
@@ -40,6 +40,12 @@ interface ApiResponse {
     usersWithPhotoInfo: number;
     porDepartamento: Record<string, number>;
   };
+  pagination?: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
 }
 
 interface Estadisticas {
@@ -72,24 +78,24 @@ export default function UsuariosPage() {
 
     const usuariosUnicos: Usuario[] = [];
     const empleadosVistos = new Set<string>();
-    
+
     listaUsuarios.forEach(usuario => {
       if (!usuario || typeof usuario !== 'object') return;
-      
+
       const claveUnica = usuario.numeroEmpleado || usuario.id;
       if (claveUnica && !empleadosVistos.has(claveUnica)) {
         empleadosVistos.add(claveUnica);
         usuariosUnicos.push(usuario);
       }
     });
-    
+
     return usuariosUnicos;
   };
 
   // Función para aplicar filtro por departamento
   const aplicarFiltroDepartamento = (departamento: string | null) => {
     setDepartamentoFiltro(departamento);
-    
+
     if (!departamento) {
       setUsuariosFiltrados(usuarios);
     } else {
@@ -105,10 +111,11 @@ export default function UsuariosPage() {
         console.log("🔄 Iniciando carga de usuarios...");
         setCargando(true);
         setError(null);
-        
-        // Usar la URL completa para evitar problemas de proxy
+
+        // SOLUCIÓN: Agregar baseUrl
         const baseUrl = window.location.origin;
-        const response = await fetch(`${baseUrl}/api/users`, { 
+
+        const response = await fetch(`${baseUrl}/api/users/bd?limit=1000`, {
           cache: "no-store",
           headers: {
             'Content-Type': 'application/json',
@@ -123,17 +130,25 @@ export default function UsuariosPage() {
           return;
         }
 
-        const data: ApiResponse = await response.json();
-        console.log("📦 Respuesta de la API recibida");
-        
+        const data = await response.json();
+        console.log("📦 Respuesta de la API recibida:", data);
+
         if (data.success) {
           console.log(`📊 Total usuarios en data: ${data.data?.length || 0}`);
-          
-          const usuariosUnicos = eliminarDuplicados(data.data || []);
+
+          // Asegurar que employeeNo exista - ARREGLO DE SINTAXIS
+          const usuariosConEmployeeNo = (data.data || []).map((user: any) => ({
+            ...user,
+            // Asegurar que employeeNo exista
+            employeeNo: user.employeeNo || user.employee_no || user.numeroEmpleado || user.id,
+            numeroEmpleado: user.employeeNo || user.employee_no || user.numeroEmpleado || user.id
+          }));
+
+          const usuariosUnicos = eliminarDuplicados(usuariosConEmployeeNo);
           setUsuarios(usuariosUnicos);
-          setUsuariosFiltrados(usuariosUnicos); // Inicialmente mostrar todos
-          
-          // Calcular estadísticas basadas en usuarios únicos
+          setUsuariosFiltrados(usuariosUnicos);
+
+          // Calcular estadísticas
           const estadisticasUnicas: Record<string, number> = {};
           usuariosUnicos.forEach(usuario => {
             const depto = usuario.departamento || "No asignado";
@@ -141,21 +156,21 @@ export default function UsuariosPage() {
           });
 
           setEstadisticas({
-            dispositivosConectados: data.estadisticas?.successfulDevices || 0,
-            totalDispositivos: data.devices?.length || 0,
+            dispositivosConectados: 1,
+            totalDispositivos: 1,
             usuariosPorDepartamento: estadisticasUnicas
           });
 
           console.log(`🎯 Carga completada: ${usuariosUnicos.length} usuarios únicos`);
-          console.log(`📊 Usuarios por departamento:`, estadisticasUnicas);
-          
-          // Mostrar información de algunos usuarios para debugging
+
+          // ARREGLO: Verificar si hay usuarios antes de acceder
           if (usuariosUnicos.length > 0) {
             console.log("🔍 Primer usuario:", {
+              id: usuariosUnicos[0].id,
               nombre: usuariosUnicos[0].nombre,
-              employeeNo: usuariosUnicos[0].numeroEmpleado,
-              departamento: usuariosUnicos[0].departamento,
-              groupId: usuariosUnicos[0].groupId
+              // employeeNo ya está definido arriba
+              numeroEmpleado: usuariosUnicos[0].numeroEmpleado,
+              departamento: usuariosUnicos[0].departamento
             });
           }
         } else {
@@ -179,7 +194,7 @@ export default function UsuariosPage() {
     const nuevosUsuarios = [...usuarios, user];
     const usuariosUnicos = eliminarDuplicados(nuevosUsuarios);
     setUsuarios(usuariosUnicos);
-    
+
     // Actualizar estadísticas
     const nuevasEstadisticas = { ...estadisticas.usuariosPorDepartamento };
     const depto = user.departamento || "No asignado";
@@ -188,7 +203,7 @@ export default function UsuariosPage() {
       ...prev,
       usuariosPorDepartamento: nuevasEstadisticas
     }));
-    
+
     // Aplicar filtro actual si existe
     if (departamentoFiltro) {
       const filtrados = usuariosUnicos.filter(u => u.departamento === departamentoFiltro);
@@ -205,27 +220,27 @@ export default function UsuariosPage() {
       usuarios.map(u => (u.id === user.id ? user : u))
     );
     setUsuarios(usuariosActualizados);
-    
+
     // Actualizar estadísticas si cambió el departamento
     if (usuarioAnterior && usuarioAnterior.departamento !== user.departamento) {
       const nuevasEstadisticas = { ...estadisticas.usuariosPorDepartamento };
-      
+
       // Restar del departamento anterior
       if (usuarioAnterior.departamento) {
-        nuevasEstadisticas[usuarioAnterior.departamento] = 
+        nuevasEstadisticas[usuarioAnterior.departamento] =
           Math.max(0, (nuevasEstadisticas[usuarioAnterior.departamento] || 1) - 1);
       }
-      
+
       // Sumar al nuevo departamento
       const nuevoDepto = user.departamento || "No asignado";
       nuevasEstadisticas[nuevoDepto] = (nuevasEstadisticas[nuevoDepto] || 0) + 1;
-      
+
       setEstadisticas(prev => ({
         ...prev,
         usuariosPorDepartamento: nuevasEstadisticas
       }));
     }
-    
+
     // Aplicar filtro actual si existe
     if (departamentoFiltro) {
       const filtrados = usuariosActualizados.filter(u => u.departamento === departamentoFiltro);
@@ -233,29 +248,29 @@ export default function UsuariosPage() {
     } else {
       setUsuariosFiltrados(usuariosActualizados);
     }
-    
+
     setUsuarioEditando(null);
   };
 
   // Eliminar usuario local
   const eliminarUsuario = () => {
     if (!usuarioAEliminar) return;
-    
+
     const usuariosRestantes = usuarios.filter(u => u.id !== usuarioAEliminar.id);
     setUsuarios(usuariosRestantes);
-    
+
     // Actualizar estadísticas
     if (usuarioAEliminar.departamento) {
       const nuevasEstadisticas = { ...estadisticas.usuariosPorDepartamento };
-      nuevasEstadisticas[usuarioAEliminar.departamento] = 
+      nuevasEstadisticas[usuarioAEliminar.departamento] =
         Math.max(0, (nuevasEstadisticas[usuarioAEliminar.departamento] || 1) - 1);
-      
+
       setEstadisticas(prev => ({
         ...prev,
         usuariosPorDepartamento: nuevasEstadisticas
       }));
     }
-    
+
     // Aplicar filtro actual si existe
     if (departamentoFiltro) {
       const filtrados = usuariosRestantes.filter(u => u.departamento === departamentoFiltro);
@@ -263,7 +278,7 @@ export default function UsuariosPage() {
     } else {
       setUsuariosFiltrados(usuariosRestantes);
     }
-    
+
     setUsuarioAEliminar(null);
   };
 
@@ -314,12 +329,12 @@ export default function UsuariosPage() {
         {/* Header rediseñado con tonos grises más claros */}
         <div className="mb-4 p-4 bg-gradient-to-r from-slate-600 via-emerald-600 to-slate-700 rounded-lg shadow-lg border border-slate-500/30">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-3">
-            
+
             {/* Sección izquierda: Título y estadísticas */}
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-1">
                 <h1 className="text-lg font-bold text-white">Gestión de Usuarios</h1>
-                
+
                 {/* Indicador de filtro activo */}
                 {departamentoFiltro && (
                   <div className="flex items-center gap-2">
@@ -341,7 +356,7 @@ export default function UsuariosPage() {
                   </div>
                 )}
               </div>
-              
+
               <div className="flex flex-wrap gap-1.5 text-xs">
                 <span className="inline-flex items-center bg-emerald-800/70 text-emerald-100 px-2.5 py-1 rounded-lg">
                   <span className="w-2 h-2 bg-emerald-300 rounded-full mr-1.5"></span>
@@ -358,7 +373,7 @@ export default function UsuariosPage() {
               </div>
             </div>
           </div>
-          
+
           {/* Lista horizontal de departamentos como filtros */}
           <div className="mt-3 pt-3 border-t border-slate-500/50">
             <div className="flex items-center text-sm font-medium mb-2 text-slate-200">
@@ -370,17 +385,16 @@ export default function UsuariosPage() {
                 • Click para filtrar
               </span>
             </div>
-            
+
             <div className="overflow-x-auto pb-2">
               <div className="flex gap-2 min-w-min">
                 {/* Botón para mostrar todos */}
                 <button
                   onClick={() => aplicarFiltroDepartamento(null)}
-                  className={`transition-all duration-200 px-4 py-2.5 rounded-lg border flex-shrink-0 shadow-sm ${
-                    !departamentoFiltro 
-                      ? 'bg-gradient-to-br from-emerald-700 to-emerald-600 border-emerald-500/50 text-white' 
-                      : 'bg-gradient-to-br from-slate-700/80 to-slate-800/80 hover:from-slate-600/80 hover:to-slate-700/80 border-slate-600/40 hover:border-slate-500/50 text-slate-200'
-                  }`}
+                  className={`transition-all duration-200 px-4 py-2.5 rounded-lg border flex-shrink-0 shadow-sm ${!departamentoFiltro
+                    ? 'bg-gradient-to-br from-emerald-700 to-emerald-600 border-emerald-500/50 text-white'
+                    : 'bg-gradient-to-br from-slate-700/80 to-slate-800/80 hover:from-slate-600/80 hover:to-slate-700/80 border-slate-600/40 hover:border-slate-500/50 text-slate-200'
+                    }`}
                 >
                   <div className="text-xs font-medium flex items-center gap-1.5">
                     <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -389,7 +403,7 @@ export default function UsuariosPage() {
                     Todos
                   </div>
                 </button>
-                
+
                 {/* Botones para cada departamento */}
                 {Object.keys(estadisticas.usuariosPorDepartamento)
                   .sort((a, b) => a.localeCompare(b)) // Ordenar alfabéticamente
@@ -406,19 +420,18 @@ export default function UsuariosPage() {
                       "Administrativo": "from-slate-600 to-slate-500 border-slate-500/50",
                       "No asignado": "from-gray-600 to-gray-500 border-gray-500/50"
                     };
-                    
+
                     const colorClase = coloresDepartamentos[depto] || "from-gray-600 to-gray-500 border-gray-500/50";
                     const isActive = departamentoFiltro === depto;
-                    
+
                     return (
                       <button
                         key={depto}
                         onClick={() => aplicarFiltroDepartamento(depto)}
-                        className={`transition-all duration-200 px-4 py-2.5 rounded-lg border flex-shrink-0 shadow-sm ${
-                          isActive
-                            ? `bg-gradient-to-br ${colorClase} text-white font-medium`
-                            : 'bg-gradient-to-br from-slate-700/80 to-slate-800/80 hover:from-slate-600/80 hover:to-slate-700/80 border-slate-600/40 hover:border-slate-500/50 text-slate-200'
-                        }`}
+                        className={`transition-all duration-200 px-4 py-2.5 rounded-lg border flex-shrink-0 shadow-sm ${isActive
+                          ? `bg-gradient-to-br ${colorClase} text-white font-medium`
+                          : 'bg-gradient-to-br from-slate-700/80 to-slate-800/80 hover:from-slate-600/80 hover:to-slate-700/80 border-slate-600/40 hover:border-slate-500/50 text-slate-200'
+                          }`}
                         title={`Filtrar por ${depto}`}
                       >
                         <div className="text-xs font-medium truncate max-w-[120px]">
@@ -448,7 +461,7 @@ export default function UsuariosPage() {
 
         {/* Lista */}
         <div className="mb-4">
-          <UsuariosList
+          <UsuarioList
             usuarios={usuariosFiltrados}
             onEdit={(u: Usuario) => setUsuarioEditando(u)}
             onDelete={(u: Usuario) => setUsuarioAEliminar(u)}

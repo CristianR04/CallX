@@ -4,19 +4,18 @@ import DigestFetch from 'digest-fetch';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 const CONFIG = {
-  username: "admin",
-  password: "Tattered3483",
-  deviceIp: ["172.31.0.165", "172.31.0.164"],
+  username: process.env.HIKUSER,
+  password: process.env.HIKPASS,
+  deviceIp: "172.31.0.165",
   batchSize: 30,
   maxBatches: 15,
-  authRetryAttempts: 3,
-  delayBetweenBatches: 300
+  authRetries: 3,
+  delayBetweenBatches: 100
 };
 
-// Mapeo de departamentos basado en groupId
 const DEPARTAMENTOS = {
   1: "TI",
-  2: "Teams Leaders", 
+  2: "Teams Leaders",
   3: "Campana 5757",
   4: "Campana SAV",
   5: "Campana REFI",
@@ -25,277 +24,181 @@ const DEPARTAMENTOS = {
   8: "Administrativo"
 };
 
-class AuthManager {
-  static createDigestClient() {
-    return new DigestFetch(CONFIG.username, CONFIG.password, {
+class HikvisionClient {
+  constructor(deviceIp) {
+    this.deviceIp = deviceIp;
+    this.client = new DigestFetch(CONFIG.username, CONFIG.password, {
       disableRetry: false,
       algorithm: 'MD5'
     });
   }
-}
 
-class UserInfoClient {
-  constructor(deviceIp) {
-    this.deviceIp = deviceIp;
-    this.refreshClient();
+  async fetchWithRetry(url, options, retryCount = 0) {
+    try {
+      const res = await this.client.fetch(url, options);
+      
+      if (res.status === 401 && retryCount < CONFIG.authRetries) {
+        await new Promise(r => setTimeout(r, 500));
+        return this.fetchWithRetry(url, options, retryCount + 1);
+      }
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (error) {
+      if (retryCount < CONFIG.authRetries) {
+        await new Promise(r => setTimeout(r, 800));
+        return this.fetchWithRetry(url, options, retryCount + 1);
+      }
+      throw error;
+    }
   }
 
-  refreshClient() {
-    this.client = AuthManager.createDigestClient();
-  }
-
-  async searchUsersBatch(searchResultPosition = 0, maxResults = CONFIG.batchSize, retryCount = 0) {
+  async getUsersBatch(position) {
     const body = {
       UserInfoSearchCond: {
         searchID: "1",
-        maxResults: maxResults,
-        searchResultPosition: searchResultPosition
+        maxResults: CONFIG.batchSize,
+        searchResultPosition: position
       }
     };
 
     const url = `https://${this.deviceIp}/ISAPI/AccessControl/UserInfo/Search?format=json`;
 
-    try {
-      const res = await this.client.fetch(url, {
-        method: "POST",
-        body: JSON.stringify(body),
-        headers: { "Content-Type": "application/json" }
-      });
-
-      if (res.status === 401 && retryCount < CONFIG.authRetryAttempts) {
-        this.refreshClient();
-        await new Promise(r => setTimeout(r, 500));
-        return this.searchUsersBatch(searchResultPosition, maxResults, retryCount + 1);
-      }
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Error ${res.status}: ${err}`);
-      }
-
-      return await res.json();
-
-    } catch (err) {
-      if (retryCount < CONFIG.authRetryAttempts &&
-        (err.message.includes('401') || err.message.includes('network'))) {
-        this.refreshClient();
-        await new Promise(r => setTimeout(r, 800));
-        return this.searchUsersBatch(searchResultPosition, maxResults, retryCount + 1);
-      }
-      throw err;
-    }
-  }
-}
-
-class UserQueryService {
-  constructor(userInfoClient) {
-    this.client = userInfoClient;
-    this.deviceIp = userInfoClient.deviceIp;
+    return this.fetchWithRetry(url, {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" }
+    });
   }
 
-  async getAllUsersWithPagination() {
-    let allRawResponses = [];
-    let currentPos = 0;
+  async getAllUsers() {
+    let allUsers = [];
+    let position = 0;
     let batchCount = 0;
-    let consecutiveErrors = 0;
+    let errors = 0;
 
-    while (batchCount < CONFIG.maxBatches && consecutiveErrors < 3) {
+    while (batchCount < CONFIG.maxBatches && errors < 3) {
       batchCount++;
 
       try {
-        const response = await this.client.searchUsersBatch(currentPos);
+        const response = await this.getUsersBatch(position);
         const usersBatch = response?.UserInfoSearch?.UserInfo || [];
-
-        allRawResponses.push({
-          batch: batchCount,
-          raw: response
-        });
 
         if (usersBatch.length === 0) break;
 
-        currentPos += usersBatch.length;
-        consecutiveErrors = 0;
+        allUsers = [...allUsers, ...usersBatch];
+        position += usersBatch.length;
+        errors = 0;
 
         if (usersBatch.length < CONFIG.batchSize) break;
-
         await new Promise(r => setTimeout(r, CONFIG.delayBetweenBatches));
-
-      } catch (err) {
-        consecutiveErrors++;
-        if (consecutiveErrors >= 2) {
-          currentPos += CONFIG.batchSize;
-        }
+      } catch (error) {
+        errors++;
+        if (errors >= 2) position += CONFIG.batchSize;
         await new Promise(r => setTimeout(r, 1000));
       }
     }
 
     return {
       deviceIp: this.deviceIp,
-      rawResponses: allRawResponses,
-      stats: {
-        batchesAttempted: batchCount,
-        consecutiveErrors
-      }
+      users: allUsers,
+      batches: batchCount,
+      totalUsers: allUsers.length
     };
   }
 }
 
-class MultiDeviceUserService {
-  constructor() {
-    this.deviceServices = CONFIG.deviceIp.map(ip => {
-      const client = new UserInfoClient(ip);
-      return new UserQueryService(client);
-    });
-  }
+function processUserData(user, deviceIp, index, total) {
+  try {
+    if (!user?.employeeNo) return null;
 
-  async getAllUsersFromAllDevices() {
-    const results = [];
-
-    for (const service of this.deviceServices) {
-      try {
-        const data = await service.getAllUsersWithPagination();
-        results.push(data);
-      } catch (err) {
-        results.push({
-          deviceIp: service.deviceIp,
-          error: err.message,
-          rawResponses: [],
-          stats: {}
-        });
-      }
-    }
-
-    return { results };
-  }
-}
-
-// Función para transformar usuarios desde raw data
-function transformarUsuariosDesdeRaw(rawData) {
-  const usuariosTransformados = [];
-
-  rawData.forEach(dispositivo => {
-    if (!dispositivo || !dispositivo.rawResponses) return;
-
-    const deviceIp = dispositivo.deviceIp || 'Desconocido';
+    const employeeId = user.employeeNo.toString().trim();
     
-    dispositivo.rawResponses.forEach((lote) => {
-      if (!lote || !lote.raw || !lote.raw.UserInfoSearch) return;
+    // SOLO ESTE LOG - Justo lo que pediste
+    console.log(`--- Procesando usuario ${index + 1}/${total}: ${employeeId} ---`);
+    console.log(`📋 Datos procesados para ${employeeId}:`);
+    console.log(`  Nombre: ${user.name || user.userName || 'Sin nombre'}`);
+    // Fin del log específico
 
-      const usuariosLote = lote.raw.UserInfoSearch.UserInfo;
-      
-      if (Array.isArray(usuariosLote)) {
-        usuariosLote.forEach((user) => {
-          if (user && user.employeeNo) {
-            // Extraer información de la foto
-            let fotoPath = null;
-            if (user.faceURL) {
-              // Convertir URL absoluta a ruta relativa
-              fotoPath = user.faceURL
-                .replace(/^https?:\/\//, '')
-                .replace(/^[^\/]+\//, '') // Quitar el dominio
-                .replace(/@/g, '%40'); // Codificar @ si existe
-            }
-            
-            // Obtener departamento basado en groupId o deptID
-            let departamento = "No asignado";
-            const grupoId = user.groupId || user.deptID;
-            
-            if (grupoId && DEPARTAMENTOS[grupoId]) {
-              departamento = DEPARTAMENTOS[grupoId];
-            } else if (grupoId) {
-              departamento = `Grupo ${grupoId}`;
-            }
-            
-            // Determinar género
-            let genero = "No especificado";
-            if (user.gender === 1) genero = 'Masculino';
-            else if (user.gender === 2) genero = 'Femenino';
-            
-            const usuarioTransformado = {
-              id: user.employeeNo,
-              nombre: user.name || 'Sin nombre',
-              tipoUsuario: user.userType || 'Desconocido',
-              numeroEmpleado: user.employeeNo,
-              fechaCreacion: user.createTime || 'No disponible',
-              fechaModificacion: user.modifyTime || 'No disponible',
-              estado: user.enable ? 'Activo' : 'Inactivo',
-              departamento: departamento,
-              dispositivo: deviceIp,
-              cedula: user.employeeNo,
-              genero: genero,
-              department_id: user.deptID,
-              groupId: user.groupId,
-              valid: user.Valid ? {
-                inicio: user.Valid.beginTime,
-                fin: user.Valid.endTime
-              } : undefined,
-              // Información para la foto
-              fotoPath: fotoPath || user.employeeNo,
-              fotoDeviceIp: deviceIp,
-              // Datos originales para debugging
-              _rawData: process.env.NODE_ENV === 'development' ? user : undefined
-            };
-            
-            usuariosTransformados.push(usuarioTransformado);
-          }
-        });
-      }
-    });
-  });
+    const fotoPath = user.faceURL 
+      ? user.faceURL
+          .replace(/^https?:\/\//, '')
+          .replace(/^[^\/]+\//, '')
+          .replace(/@/g, '%40')
+      : null;
 
-  return usuariosTransformados;
+    const grupoId = user.groupId || user.deptID;
+    const departamento = DEPARTAMENTOS[grupoId] || (grupoId ? `Grupo ${grupoId}` : "No asignado");
+
+    let genero = "No especificado";
+    if (user.gender === 1 || user.gender === 'male') genero = 'Masculino';
+    else if (user.gender === 2 || user.gender === 'female') genero = 'Femenino';
+
+    let fechaCreacion = null;
+    let fechaModificacion = null;
+    
+    if (user.Valid?.beginTime) fechaCreacion = user.Valid.beginTime.substring(0, 10);
+    if (user.Valid?.endTime) fechaModificacion = user.Valid.endTime.substring(0, 10);
+
+    const estado = user.Valid?.enable !== undefined 
+      ? (user.Valid.enable ? 'Activo' : 'Inactivo') 
+      : 'Desconocido';
+
+    let tipoUsuario = 'Desconocido';
+    if (user.userType === 0) tipoUsuario = 'Normal';
+    else if (user.userType === 1) tipoUsuario = 'Administrador';
+    else if (user.userType === 2) tipoUsuario = 'Supervisor';
+    else if (typeof user.userType === 'string') tipoUsuario = user.userType;
+
+    return {
+      employeeNo: employeeId,
+      nombre: (user.name || user.userName || 'Sin nombre').trim(),
+      tipoUsuario,
+      fechaCreacion,
+      fechaModificacion,
+      estado,
+      departamento,
+      genero,
+      fotoPath,
+      deviceIp
+    };
+  } catch (error) {
+    return null;
+  }
 }
 
 export async function GET(request) {
+  const startTime = Date.now();
+  console.log(`Iniciando consulta Hikvision (${CONFIG.deviceIp})...`);
+
   try {
-    console.log('🔄 INICIANDO CONSULTA DE USUARIOS HIKVISION...');
-    
-    const multi = new MultiDeviceUserService();
-    const result = await multi.getAllUsersFromAllDevices();
+    const client = new HikvisionClient(CONFIG.deviceIp);
+    const result = await client.getAllUsers();
 
-    // Transformar usuarios para el frontend
-    const usuariosTransformados = transformarUsuariosDesdeRaw(result.results);
+    const processedUsers = result.users
+      .map((user, index) => processUserData(user, result.deviceIp, index, result.totalUsers))
+      .filter(user => user !== null);
 
-    // Calcular estadísticas por departamento
-    const estadisticasPorDepartamento = {};
-    usuariosTransformados.forEach(usuario => {
-      const depto = usuario.departamento;
-      estadisticasPorDepartamento[depto] = (estadisticasPorDepartamento[depto] || 0) + 1;
+    const duration = Date.now() - startTime;
+    console.log(`✅ Consulta completada en ${duration}ms`);
+    console.log(`📊 Total usuarios: ${processedUsers.length}`);
+
+    return NextResponse.json({
+      success: true,
+      stats: {
+        total_users: processedUsers.length,
+        device_ip: result.deviceIp,
+        duration_ms: duration
+      },
+      data: processedUsers
     });
 
-    // Devolver datos transformados
-    const responseData = {
-      success: true,
-      message: "Usuarios obtenidos correctamente",
-      timestamp: new Date().toISOString(),
-      devices: CONFIG.deviceIp,
-      data: usuariosTransformados,
-      estadisticas: {
-        totalDevices: CONFIG.deviceIp.length,
-        successfulDevices: result.results.filter(device => !device.error).length,
-        devicesWithErrors: result.results.filter(device => device.error).length,
-        totalUsers: usuariosTransformados.length,
-        usersWithPhotoInfo: usuariosTransformados.filter(u => u.fotoPath && u.fotoPath !== u.numeroEmpleado).length,
-        porDepartamento: estadisticasPorDepartamento
-      },
-      // Para debugging, mantener raw data solo en desarrollo
-      rawData: process.env.NODE_ENV === 'development' ? result.results : undefined
-    };
-
-    console.log(`✅ CONSULTA COMPLETADA: ${usuariosTransformados.length} usuarios`);
-    console.log(`📊 Estadísticas por departamento:`, estadisticasPorDepartamento);
-
-    return NextResponse.json(responseData);
-
   } catch (error) {
-    console.error('❌ ERROR EN CONSULTA DE USUARIOS:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error.message,
-        timestamp: new Date().toISOString()
-      },
-      { status: 500 }
-    );
+    console.error('Error:', error.message);
+    return NextResponse.json({
+      success: false,
+      error: error.message,
+      device_ip: CONFIG.deviceIp
+    }, { status: 500 });
   }
 }
