@@ -1,10 +1,17 @@
+import React from 'react';
+
 interface PaginationProps {
   currentPage: number;
   totalPages: number;
   onPageChange: (page: number) => void;
 }
 
-export function Pagination({ currentPage, totalPages, onPageChange }: PaginationProps) {
+// Agrega ": JSX.Element" al final de la declaración de la función
+export function Pagination({ 
+  currentPage, 
+  totalPages, 
+  onPageChange 
+}: PaginationProps): React.JSX.Element {  // ← AQUÍ ESTÁ LA SOLUCIÓN
   const getPageNumbers = () => {
     const pages: (number | string)[] = [];
     const maxVisible = 7;

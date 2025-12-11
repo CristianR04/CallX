@@ -10,13 +10,13 @@ const DEVICES = [
     port: 443,
     protocol: 'https'
   },
-  // { 
-  //   ip: process.env.HIKVISION_IP_2 || "172.31.0.164", 
-  //   username: process.env.HIKVISION_USERNAME_2 || "admin", 
-  //   password: process.env.HIKVISION_PASSWORD_2 || "Tattered3483",
-  //   port: 80,
-  //   protocol: 'http'
-  // }
+  { 
+    ip: process.env.HIKVISION_IP_2 || "172.31.0.164", 
+    username: process.env.HIKVISION_USERNAME_2 || "admin", 
+    password: process.env.HIKVISION_PASSWORD_2 || "Tattered3483",
+    port: 80,
+    protocol: 'http'
+  }
 ].filter(device => device.ip);
 
 // VALIDADOR DE SEGURIDAD
@@ -311,6 +311,44 @@ export async function POST(request) {
     console.error('💥 ERROR GENERAL EN ENDPOINT:', error);
     return NextResponse.json({ success: false, error: 'Error interno del servidor' }, { status: 500 });
   }
+  // Llamar al endpoint de base de datos para sincronizar
+  try {
+    console.log(`🔄 Sincronizando eliminación en base de datos...`);
+    
+    // Llamada interna al endpoint de DB
+    const dbResponse = await fetch(`${request.headers.get('origin') || 'http://localhost:3000'}/api/database/users/delete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Pasar algunas cabeceras para seguridad
+        'x-forwarded-for': ip,
+        'user-agent': userAgent
+      },
+      body: JSON.stringify({ employeeNo: validatedEmployeeNo })
+    });
+    
+    const dbResult = await dbResponse.json();
+    
+    // Incluir resultado de DB en la respuesta final
+    finalResult.databaseSync = {
+      attempted: true,
+      success: dbResult.success,
+      message: dbResult.message || 'Sin respuesta de DB',
+      warning: dbResult.warning || false
+    };
+    
+    console.log(`🗄️ Resultado sincronización DB:`, dbResult);
+    
+  } catch (dbError) {
+    console.error(`❌ Error al sincronizar con DB:`, dbError.message);
+    finalResult.databaseSync = {
+      attempted: true,
+      success: false,
+      error: dbError.message,
+      warning: true
+    };
+  }
+
 }
 
 // ENDPOINT GET PARA INFORMACIÓN

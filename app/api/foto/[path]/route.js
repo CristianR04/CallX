@@ -26,18 +26,13 @@ export async function GET(request, { params }) {
         { status: 400 }
       );
     }
-
-    console.log(`📸 Procesando solicitud de foto: ${path}`);
     
     // Decodificar el path
     const decodedPath = decodeURIComponent(path);
     
     // Obtener parámetros adicionales
     const deviceIp = searchParams.get('deviceIp') || CONFIG.deviceIps[0];
-    
-    console.log(`🖥️ Usando dispositivo: ${deviceIp}`);
-    console.log(`📁 Ruta decodificada: ${decodedPath}`);
-    
+        
     // Función para probar una ruta específica
     const probarRuta = async (rutaCompleta) => {
       try {
@@ -45,9 +40,7 @@ export async function GET(request, { params }) {
           disableRetry: false,
           algorithm: 'MD5'
         });
-        
-        console.log(`🔍 Probando ruta: ${rutaCompleta}`);
-        
+                
         const response = await client.fetch(rutaCompleta, {
           agent: httpsAgent,
           timeout: 10000,
@@ -121,7 +114,6 @@ export async function GET(request, { params }) {
         const resultado = await probarRuta(rutaCompleta);
         
         if (resultado.success) {
-          console.log(`🎉 ¡Foto encontrada en: ${ruta}`);
           return new NextResponse(resultado.buffer, {
             status: 200,
             headers: {

@@ -1,12 +1,19 @@
 {
   "name": "consultas_vista",
   "version": "0.1.0",
+  "type": "module",
   "private": true,
   "scripts": {
-    "dev": "next -p 3001",
+    "dev": "next -p 3000",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "next start -p 3001",
+    "lint": "eslint",
+    "cron": "node cron-sincronizador.js",
+    "cron:dev": "nodemon cron-sincronizador.js",
+    "cron:start": "pm2 start cron-sincronizador.js --name sincronizador-cron",
+    "cron:stop": "pm2 stop sincronizador-cron",
+    "cron:logs": "pm2 logs sincronizador-cron",
+    "cron:status": "pm2 status sincronizador-cron"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
@@ -28,10 +35,11 @@
     "postgres": "^3.4.7",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "websocket": "^1.0.35"
+    "websocket": "^1.0.35",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/postcss": "^4.1.17",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/react": "^19",

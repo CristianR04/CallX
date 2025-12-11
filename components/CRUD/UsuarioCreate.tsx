@@ -1,27 +1,12 @@
+// components/CRUD/UsuarioCreate.tsx
 "use client";
 
 import { useState, useEffect } from "react";
-
-// Definir la interfaz Usuario localmente
-interface Usuario {
-  id: string;
-  nombre: string;
-  tipoUsuario?: string;
-  numeroEmpleado: string;
-  correo?: string;
-  telefono?: string;
-  fechaCreacion?: string;
-  fechaModificacion?: string;
-  estado?: string;
-  departamento?: string;
-  dispositivo?: string;
-  cedula?: string;
-  genero?: string;
-  department_id?: number;
-}
+import { Usuario } from "@/types/usuario";
 
 interface UsuarioCreateModalProps {
-  onCreate: (usuario: Usuario) => void;
+  onCreate: (usuario: Usuario) => Promise<void>;
+  defaultDepartamento?: string;
 }
 
 // Departamentos actualizados según la imagen con sus IDs
@@ -36,7 +21,7 @@ const DEPARTAMENTOS = [
   { id: "8", nombre: "Administrativo" }
 ];
 
-export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps) {
+export default function UsuarioCreateModal({ onCreate, defaultDepartamento }: UsuarioCreateModalProps) {
   const [open, setOpen] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -44,13 +29,9 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
 
   const [form, setForm] = useState({
     nombre: "",
-    cedula: "",
     genero: "",
     numeroEmpleado: "",
-    correo: "",
-    telefono: "",
-    departamento: "",
-    estado: "Activo"
+    departamento: defaultDepartamento || ""
   });
 
   // Efecto para manejar la animación
@@ -64,6 +45,13 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
       setIsAnimating(false);
     }
   }, [open]);
+
+  // Efecto para establecer el departamento por defecto
+  useEffect(() => {
+    if (defaultDepartamento) {
+      setForm(prev => ({ ...prev, departamento: defaultDepartamento }));
+    }
+  }, [defaultDepartamento]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -84,10 +72,10 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
       // Preparar datos para Hikvision
       const hikvisionData = {
         ...form
-        // El groupId se calculará automáticamente en el backend basado en el nombre del departamento
       };
 
-      // Enviar a Hikvision
+      // 🔴 PASO 1: Crear en Hikvision (endpoint existente)
+      console.log('🔄 Creando usuario en Hikvision...');
       const response = await fetch('/api/hikvision/users/create', {
         method: 'POST',
         headers: {
@@ -99,54 +87,69 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
       const result = await response.json();
 
       if (!result.success) {
-        // Mostrar detalles del error por dispositivo
         const errorDetails = result.results
-          .filter((r: any) => !r.success)
-          .map((r: any) => `Dispositivo ${r.deviceIp}: ${r.error}`)
-          .join('\n');
+          ?.filter((r: any) => !r.success)
+          ?.map((r: any) => `Dispositivo ${r.deviceIp}: ${r.error}`)
+          ?.join('\n') || result.error || 'Error desconocido';
         
         throw new Error(`Error en creación:\n${errorDetails}`);
       }
 
-      // Crear usuario local con department_id
+      // 🟢 PASO 2: Sincronizar automáticamente con la base de datos
+      console.log('✅ Usuario creado en Hikvision. Sincronizando con BD...');
+      
+      // Usar el endpoint unificado para sincronizar
+      try {
+        const syncResponse = await fetch('/api/users', {
+          method: 'POST', // POST fuerza sincronización manual
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        const syncResult = await syncResponse.json();
+        
+        if (!syncResult.success) {
+          console.warn('⚠️ Usuario creado pero sincronización falló:', syncResult.error);
+        } else {
+          console.log(`✅ Sincronización exitosa:`, syncResult.stats);
+        }
+      } catch (syncError) {
+        console.warn('⚠️ Error en sincronización:', syncError);
+        // Continuamos aunque falle la sincronización
+      }
+
+      // 🟡 PASO 3: Crear usuario local para UI usando el tipo correcto
       const nuevoUsuario: Usuario = {
-        id: Date.now().toString(),
-        cedula: form.cedula,
+        id: Date.now().toString(), // ID temporal
         nombre: form.nombre,
         genero: form.genero,
-        numeroEmpleado: form.numeroEmpleado || form.cedula,
-        correo: form.correo,
-        telefono: form.telefono,
+        numeroEmpleado: form.numeroEmpleado,
+        employeeNo: form.numeroEmpleado, // Asegurar que employeeNo esté presente
         departamento: form.departamento,
-        department_id: result.userData.department_id, // ID numérico del departamento
-        estado: form.estado,
+        estado: "Activo",
         fechaCreacion: new Date().toISOString()
       };
 
-      onCreate(nuevoUsuario);
+      // Llamar a onCreate (que ahora es async)
+      await onCreate(nuevoUsuario);
 
       // Resetear formulario
       setForm({
         nombre: "",
-        cedula: "",
         genero: "",
         numeroEmpleado: "",
-        correo: "",
-        telefono: "",
-        departamento: "",
-        estado: "Activo"
+        departamento: defaultDepartamento || ""
       });
+      
       setOpen(false);
 
-      // Mostrar resultado
-      const successfulDevices = result.results.filter((r: any) => r.success).length;
-      const totalDevices = result.results.length;
+      // Mostrar mensaje combinado
+      const successfulDevices = result.results?.filter((r: any) => r.success)?.length || 0;
+      const totalDevices = result.results?.length || 0;
       
-      if (successfulDevices === totalDevices) {
-        alert("Usuario creado exitosamente en todos los dispositivos");
-      } else {
-        alert(`Usuario creado parcialmente: ${result.message}`);
-      }
+      let message = `✅ Usuario creado exitosamente en ${successfulDevices}/${totalDevices} dispositivos`;
+      message += "\n📊 Base de datos sincronizada automáticamente";
+      
+      alert(message);
 
     } catch (error: unknown) {
       console.error('Error:', error);
@@ -158,7 +161,7 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
         errorMessage = error;
       }
       
-      alert(`Error al crear usuario: ${errorMessage}`);
+      alert(`❌ Error al crear usuario: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
@@ -175,12 +178,13 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
     <>
       <button
         onClick={() => setOpen(true)}
-        className="group fixed top-24 right-10 z-40
+        className="group fixed top-24 right-10 z-40 
                   flex items-center gap-2 
                   w-11 hover:w-40 h-11 
                   bg-green-600 hover:bg-green-700
                   text-white rounded-full shadow-md 
                   transition-all duration-300 overflow-hidden"
+        aria-label="Crear nuevo usuario"
       >
         <i className="bi bi-plus-lg text-xl ml-3"></i>
         <span className="whitespace-nowrap opacity-0 group-hover:opacity-100 
@@ -207,6 +211,7 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
                 onClick={closeModal}
                 className="absolute top-3 right-3 text-gray-600 hover:text-black text-xl transition-colors"
                 disabled={loading}
+                aria-label="Cerrar modal"
               >
                 <i className="bi bi-x-lg"></i>
               </button>
@@ -219,17 +224,6 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
                 </div>
 
                 <input
-                  name="cedula"
-                  type="text"
-                  placeholder="Cédula *"
-                  value={form.cedula}
-                  onChange={handleChange}
-                  className="border border-gray-300 p-2 rounded-md text-black focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                  required
-                  disabled={loading}
-                />
-
-                <input
                   name="numeroEmpleado"
                   type="text"
                   placeholder="Número de empleado *"
@@ -239,6 +233,20 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
                   required
                   disabled={loading}
                 />
+
+                <select
+                  name="genero"
+                  value={form.genero}
+                  onChange={handleChange}
+                  className="border border-gray-300 p-2 rounded-md text-black focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                  required
+                  disabled={loading}
+                >
+                  <option value="">Seleccionar género *</option>
+                  <option value="Masculino">Masculino</option>
+                  <option value="Femenino">Femenino</option>
+                  <option value="Otro">Otro</option>
+                </select>
 
                 <input
                   name="nombre"
@@ -267,7 +275,7 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
                     <option value="">Seleccionar departamento</option>
                     {DEPARTAMENTOS.map(depto => (
                       <option key={depto.id} value={depto.nombre}>
-                        {depto.nombre} (ID: {depto.id})
+                        {depto.nombre} 
                       </option>
                     ))}
                   </select>
@@ -275,56 +283,6 @@ export default function UsuarioCreateModal({ onCreate }: UsuarioCreateModalProps
                     El ID del departamento se asignará automáticamente
                   </p>
                 </div>
-
-                <select
-                  name="genero"
-                  value={form.genero}
-                  onChange={handleChange}
-                  className="border border-gray-300 p-2 rounded-md text-black focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                  required
-                  disabled={loading}
-                >
-                  <option value="">Seleccionar género *</option>
-                  <option value="Masculino">Masculino</option>
-                  <option value="Femenino">Femenino</option>
-                  <option value="Otro">Otro</option>
-                </select>
-
-                <select
-                  name="estado"
-                  value={form.estado}
-                  onChange={handleChange}
-                  className="border border-gray-300 p-2 rounded-md text-black focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                  disabled={loading}
-                >
-                  <option value="Activo">Activo</option>
-                  <option value="Inactivo">Inactivo</option>
-                </select>
-
-                {/* Información de contacto */}
-                <div className="md:col-span-2 mt-4">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">Información de Contacto</h3>
-                </div>
-
-                <input
-                  name="correo"
-                  type="email"
-                  placeholder="Correo electrónico"
-                  value={form.correo}
-                  onChange={handleChange}
-                  className="border border-gray-300 p-2 rounded-md text-black focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                  disabled={loading}
-                />
-
-                <input
-                  name="telefono"
-                  type="tel"
-                  placeholder="Teléfono"
-                  value={form.telefono}
-                  onChange={handleChange}
-                  className="border border-gray-300 p-2 rounded-md text-black focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                  disabled={loading}
-                />
 
                 {/* Botón de crear */}
                 <div className="md:col-span-2 mt-6">

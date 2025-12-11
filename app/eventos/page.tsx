@@ -1,396 +1,301 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { EventosTable } from '@/components/EventosTable';
-import { Header } from '@/components/Header';
+import { HeaderEventos } from '@/components/Header';
 import Navbar from "@/components/navbar";
+import IdleSessionProtector from '@/components/IdleSessionProtector';
+import { descargarExcel } from '@/utils/excelGenerator';
 
 export interface Evento {
   empleadoId: string;
   nombre: string;
   fecha: string;
-  horaEntrada?: string;
-  horaSalida?: string;
-  horaSalidaAlmuerzo?: string;     // AÑADIR
-  horaEntradaAlmuerzo?: string;    // AÑADIR
-  duracionAlmuerzo?: string;       // AÑADIR
-  campaña?: string;
-  tipo?: string;
-  foto?: string;
+  horaEntrada: string;
+  horaSalida: string;
+  horaSalidaAlmuerzo: string;
+  horaEntradaAlmuerzo: string;
+  duracionAlmuerzo?: string;
+  campaña: string;
+  tipo: string;
+  subtipo: string;
+  estado: string;
+  estadoColor: string;
+  estadoIcono: string;
+  estadoDescripcion: string;
+  faltas: string[];
+  tieneProblemas: boolean;
+  necesitaRevision: boolean;
+  tieneAlmuerzoCompleto: boolean;
   dispositivo?: string;
+  foto?: string;
 }
 
-export default function HomePage() {
+export default function EventosPage() {
   const [eventos, setEventos] = useState<Evento[]>([]);
+  const [eventosFiltrados, setEventosFiltrados] = useState<Evento[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPeriodo, setSelectedPeriodo] = useState<'hoy' | '7dias' | '30dias' | 'personalizado'>('hoy');
   const [fechaInicio, setFechaInicio] = useState<string>('');
   const [fechaFin, setFechaFin] = useState<string>('');
+  const [departamentoFiltro, setDepartamentoFiltro] = useState<string | null>(null);
+  const [estadisticasDepartamentos, setEstadisticasDepartamentos] = useState({
+    usuariosPorDepartamento: {} as Record<string, number>
+  });
+  const [isDescargandoExcel, setIsDescargandoExcel] = useState(false);
 
-  // Procesar eventos agrupados - VERSIÓN CON ALMUERZOS
-  const procesarEventosAgrupados = (eventos: any[]): Evento[] => {
-    console.log('🔄 Procesando eventos con almuerzos:', eventos.length, 'eventos');
-
-    const eventosAgrupados: { [key: string]: Evento } = {};
-
-    eventos.forEach((evento, index) => {
-      const clave = `${evento.empleadoId}-${evento.fecha}`;
-
-      if (!eventosAgrupados[clave]) {
-        eventosAgrupados[clave] = {
-          empleadoId: evento.empleadoId,
-          nombre: evento.nombre,
-          fecha: evento.fecha,
-          campaña: evento.campaña || 'Sin grupo',
-          horaEntrada: '',
-          horaSalida: '',
-          // ¡AÑADE ESTOS CAMPOS!
-          horaSalidaAlmuerzo: evento.horaSalidaAlmuerzo || '',
-          horaEntradaAlmuerzo: evento.horaEntradaAlmuerzo || '',
-          duracionAlmuerzo: evento.duracionAlmuerzo || '',
-          dispositivo: evento.dispositivo || 'Desconocido',
-          foto: evento.foto || '',
-          tipo: evento.tipo || 'Registro'
-        };
+  // Inicializar desde localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedFilter = localStorage.getItem('departamentoFiltro');
+      if (savedFilter) {
+        setDepartamentoFiltro(savedFilter);
       }
-
-      // DEBUG: Mostrar datos de almuerzo
-      if (index < 2 && (evento.horaSalidaAlmuerzo || evento.horaEntradaAlmuerzo)) {
-        console.log(`🍽️ Evento ${index + 1} tiene almuerzo:`, {
-          empleadoId: evento.empleadoId,
-          salidaAlmuerzo: evento.horaSalidaAlmuerzo,
-          entradaAlmuerzo: evento.horaEntradaAlmuerzo,
-          duracion: evento.duracionAlmuerzo
-        });
-      }
-
-      // FUNCIÓN QUE MANTIENE SEGUNDOS
-      const formatearHora = (hora: string) => {
-        if (!hora || hora === '--:--') return '';
-
-        // Si ya tiene formato completo con segundos, mantenerlo
-        if (hora.match(/^\d{1,2}:\d{2}:\d{2}$/)) {
-          return hora;
-        }
-
-        // Si solo tiene horas y minutos, agregar segundos
-        if (hora.match(/^\d{1,2}:\d{2}$/)) {
-          return `${hora}:00`;
-        }
-
-        return hora;
-      };
-
-      const horaEntradaFormateada = formatearHora(evento.horaEntrada);
-      const horaSalidaFormateada = formatearHora(evento.horaSalida);
-
-      // Asignar horas
-      if (horaEntradaFormateada) {
-        eventosAgrupados[clave].horaEntrada = horaEntradaFormateada;
-      }
-      if (horaSalidaFormateada) {
-        eventosAgrupados[clave].horaSalida = horaSalidaFormateada;
-      }
-
-      // Mantener los datos de almuerzo (ya vienen del endpoint)
-      if (evento.horaSalidaAlmuerzo && evento.horaSalidaAlmuerzo !== '--:--') {
-        eventosAgrupados[clave].horaSalidaAlmuerzo = evento.horaSalidaAlmuerzo;
-      }
-      if (evento.horaEntradaAlmuerzo && evento.horaEntradaAlmuerzo !== '--:--') {
-        eventosAgrupados[clave].horaEntradaAlmuerzo = evento.horaEntradaAlmuerzo;
-      }
-      if (evento.duracionAlmuerzo) {
-        eventosAgrupados[clave].duracionAlmuerzo = evento.duracionAlmuerzo;
-      }
-
-      // Actualizar tipo basado en horas disponibles
-      if (eventosAgrupados[clave].horaEntrada && eventosAgrupados[clave].horaSalida) {
-        eventosAgrupados[clave].tipo = 'Entrada/Salida';
-      } else if (eventosAgrupados[clave].horaEntrada) {
-        eventosAgrupados[clave].tipo = 'Solo Entrada';
-      } else if (eventosAgrupados[clave].horaSalida) {
-        eventosAgrupados[clave].tipo = 'Solo Salida';
-      }
-    });
-
-    // DEBUG: Mostrar resultado final CON ALMUERZOS
-    const resultado = Object.values(eventosAgrupados);
-    console.log('✅ Eventos procesados CON ALMUERZOS:', resultado.length);
-
-    if (resultado.length > 0) {
-      console.log('👤 Primer evento procesado (con almuerzo):', {
-        empleadoId: resultado[0].empleadoId,
-        horaEntrada: resultado[0].horaEntrada,
-        horaSalida: resultado[0].horaSalida,
-        horaSalidaAlmuerzo: resultado[0].horaSalidaAlmuerzo, // ← ¡Nuevo!
-        horaEntradaAlmuerzo: resultado[0].horaEntradaAlmuerzo, // ← ¡Nuevo!
-        duracionAlmuerzo: resultado[0].duracionAlmuerzo, // ← ¡Nuevo!
-        tipo: resultado[0].tipo
-      });
+      
+      const hoy = new Date().toISOString().split('T')[0];
+      setFechaInicio(hoy);
+      setFechaFin(hoy);
     }
+  }, []);
 
-    return resultado;
-  };
-
-  // Transformar para BD - SOLO ENVIAR HORAS SIMPLES
-  const transformarParaBD = (eventos: Evento[]): any[] => {
-    return eventos.map(evento => {
-      if (!evento.empleadoId || !evento.fecha) {
-        console.log('⚠️ Evento omitido - falta empleadoId o fecha:', evento);
-        return null;
-      }
-
-      // Función para extraer solo la hora de formatos ISO
-      const extraerHoraSimple = (horaCompleta: string | undefined) => {
-        if (!horaCompleta) return null;
-
-        // Si es formato ISO (2025-11-29T05:00:06-05:00)
-        if (horaCompleta.includes('T')) {
-          try {
-            const fecha = new Date(horaCompleta);
-            const horas = fecha.getHours().toString().padStart(2, '0');
-            const minutos = fecha.getMinutes().toString().padStart(2, '0');
-            return `${horas}:${minutos}`; // Enviar formato simple "05:00"
-          } catch (error) {
-            return null;
-          }
-        }
-
-        // Si ya es formato simple o AM/PM, enviar tal cual
-        return horaCompleta;
-      };
-
-      let tipo_evento = 'Registro';
-      if (evento.horaEntrada && evento.horaSalida) {
-        tipo_evento = 'Entrada/Salida';
-      } else if (evento.horaEntrada) {
-        tipo_evento = 'Solo Entrada';
-      } else if (evento.horaSalida) {
-        tipo_evento = 'Solo Salida';
-      }
-
-      return {
-        documento: evento.empleadoId,
-        nombre: evento.nombre || 'Sin nombre',
-        fecha: evento.fecha,
-        hora_entrada: extraerHoraSimple(evento.horaEntrada),
-        hora_salida: extraerHoraSimple(evento.horaSalida),
-        tipo_evento: tipo_evento,
-        dispositivo_ip: evento.dispositivo || 'Desconocido',
-        imagen: evento.foto || null
-      };
-    }).filter(evento => evento !== null);
-  };
-
-  // Guardar en BD
-  const guardarEnBaseDatos = async (eventosParaGuardar?: Evento[]) => {
-    const eventosAGuardar = eventosParaGuardar || eventos;
-
-    if (eventosAGuardar.length === 0) {
-      console.log('📝 No hay eventos para guardar');
-      return;
-    }
-
-    try {
-      const eventosParaBD = transformarParaBD(eventosAGuardar);
-
-      const response = await fetch('/api/eventos/guardar-eventos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventos: eventosParaBD }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        console.log(`💾 BD: ${result.guardados} guardados, ${result.duplicados} actualizados`);
-      }
-    } catch (error) {
-      console.error('❌ Error guardando en BD:', error);
-    }
-  };
-
-  // Cargar eventos desde BD
-  const cargarEventosDesdeBD = async (periodo: 'hoy' | '7dias' | '30dias' | 'personalizado', inicio?: string, fin?: string) => {
+  // Cargar eventos desde el API
+  const cargarEventos = useCallback(async (
+    periodo: 'hoy' | '7dias' | '30dias' | 'personalizado',
+    inicio?: string,
+    fin?: string
+  ) => {
     setIsLoading(true);
     try {
       let url = `/api/eventos/bd?rango=${periodo}`;
-
       if (periodo === 'personalizado' && inicio && fin) {
         url += `&fechaInicio=${inicio}&fechaFin=${fin}`;
       }
 
-      console.log('🔍 Consultando BD:', url);
       const response = await fetch(url);
       const data = await response.json();
 
-      console.log('📊 Respuesta CRUDA de BD:', {
-        success: data.success,
-        eventosCount: data.eventos?.length || 0,
-        primerEvento: data.eventos?.[0] // ← Ver formato directo de BD
-      });
+      if (data.success && data.eventos) {
+        console.log('✅ Eventos cargados:', data.eventos.length);
+        
+        // Verificar estructura de datos
+        if (data.eventos.length > 0) {
+          console.log('📊 Ejemplo de evento:', {
+            id: data.eventos[0].empleadoId,
+            nombre: data.eventos[0].nombre,
+            campaña: data.eventos[0].campaña,
+            campañaOriginal: data.eventos[0].campañaOriginal
+          });
+          
+          // Mostrar campañas únicas
+          const campañasUnicas = [...new Set(data.eventos.map((e: Evento) => e.campaña))];
+          console.log('📊 Campañas únicas encontradas:', campañasUnicas);
+        }
 
-      if (data.success) {
-        console.log('🔄 Procesando eventos desde BD...');
-        const eventosProcesados = procesarEventosAgrupados(data.eventos || []);
-        setEventos(eventosProcesados);
-        console.log(`✅ ${eventosProcesados.length} eventos cargados en la vista`);
+        setEventos(data.eventos);
+        
+        // Extraer estadísticas para filtros
+        if (data.estadisticas?.porCampaña) {
+          const usuariosPorDepartamento: Record<string, number> = {};
+          Object.entries(data.estadisticas.porCampaña).forEach(([campaña, stats]: [string, any]) => {
+            usuariosPorDepartamento[campaña] = stats.total || 0;
+          });
+          setEstadisticasDepartamentos({ usuariosPorDepartamento });
+        }
+
+        // Aplicar filtro actual a los nuevos datos
+        aplicarFiltro(data.eventos, departamentoFiltro);
       } else {
-        console.error('❌ Error en respuesta BD:', data.error);
+        console.error('❌ API no devolvió éxito');
         setEventos([]);
+        setEventosFiltrados([]);
       }
     } catch (error) {
-      console.error('❌ Error cargando desde BD:', error);
+      console.error('❌ Error cargando eventos:', error);
       setEventos([]);
+      setEventosFiltrados([]);
     } finally {
       setIsLoading(false);
     }
+  }, [departamentoFiltro]);
+
+  // Función normalizadora para comparar strings (elimina espacios y convierte a minúsculas)
+  const normalizarString = (str: string): string => {
+    return str.trim().toLowerCase().replace(/\s+/g, ' ');
   };
 
-  // Sincronización automática cada minuto - VERSIÓN CORREGIDA
-  useEffect(() => {
-    const sincronizarYActualizar = async () => {
-      try {
-        console.log('🔄 Ejecutando sincronización automática (3 días)...');
-
-        // Calcular fecha de hace 3 días
-        const hoy = new Date();
-        const hace3Dias = new Date(hoy);
-        hace3Dias.setDate(hoy.getDate() - 3);
-
-        const fechaHoy = hoy.toISOString().split('T')[0];
-        const fechaHace3Dias = hace3Dias.toISOString().split('T')[0];
-
-        console.log(`📅 Rango: ${fechaHace3Dias} a ${fechaHoy}`);
-
-        // 1. Consultar dispositivos biométricos (últimos 3 días)
-        const response = await fetch(`/api/eventos?rango=personalizado&fechaInicio=${fechaHace3Dias}&fechaFin=${fechaHoy}`);
-        const data = await response.json();
-
-        if (data.success && data.eventos && data.eventos.length > 0) {
-          console.log(`📥 ${data.eventos.length} eventos nuevos de los últimos 3 días`);
-
-          // 2. Transformar eventos del formato de dispositivos al formato de BD
-          const eventosParaBD = data.eventos.map((evento: any) => {
-            // Determinar si es entrada o salida basado en el tipo del dispositivo
-            let tipo_evento = 'Solo Entrada'; // Por defecto asumimos entrada
-            if (evento.tipo && evento.tipo.includes('Salida')) {
-              tipo_evento = 'Solo Salida';
-            }
-
-            return {
-              documento: evento.empleadoId,
-              nombre: evento.nombre,
-              fecha: evento.fecha,
-              hora_entrada: tipo_evento === 'Solo Entrada' ? evento.hora : null,
-              hora_salida: tipo_evento === 'Solo Salida' ? evento.hora : null,
-              tipo_evento: tipo_evento,
-              dispositivo_ip: evento.dispositivo || 'Desconocido',
-              imagen: evento.foto || null
-            };
-          });
-
-          console.log('📦 Eventos transformados para BD:', eventosParaBD.length);
-
-          // 3. Guardar en BD
-          const saveResponse = await fetch('/api/eventos/guardar-eventos', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(eventosParaBD),
-
-          });
-
-          console.log("EVENTOS ENVIADOS A BD:", eventos);
-
-
-          const saveResult = await saveResponse.json();
-
-          if (saveResult.success) {
-            console.log(`💾 BD: ${saveResult.guardados} eventos procesados (${saveResult.nuevos} nuevos, ${saveResult.actualizados} actualizados)`);
-
-            // 4. Recargar vista desde BD solo si hay eventos de HOY
-            // Pero para evitar recargas innecesarias, verificamos si estamos viendo "hoy"
-            if (selectedPeriodo === 'hoy') {
-              cargarEventosDesdeBD(selectedPeriodo, fechaInicio, fechaFin);
-            }
-          } else {
-            console.error('❌ Error guardando en BD:', saveResult.error);
-          }
-        } else {
-          console.log('📭 No hay eventos nuevos en dispositivos');
-        }
-      } catch (error) {
-        console.error('❌ Error en sincronización automática:', error);
+  // Aplicar filtro por departamento/campaña
+  const aplicarFiltro = useCallback((eventosLista: Evento[], filtro: string | null) => {
+    if (!filtro || filtro === 'Todos' || filtro === 'todos') {
+      console.log('📊 Mostrando TODOS los eventos');
+      setEventosFiltrados(eventosLista);
+      return;
+    }
+    
+    const filtroNormalizado = normalizarString(filtro);
+    console.log('🔍 Buscando campaña:', filtro, 'Normalizado:', filtroNormalizado);
+    
+    const filtrados = eventosLista.filter(evento => {
+      const campañaEvento = evento.campaña || 'Sin grupo';
+      const campañaNormalizada = normalizarString(campañaEvento);
+      
+      const coincide = campañaNormalizada === filtroNormalizado;
+      
+      if (coincide) {
+        console.log('✅ Coincidencia encontrada:', {
+          empleado: evento.nombre,
+          campañaOriginal: campañaEvento,
+          filtroBuscado: filtro
+        });
       }
-    };
+      
+      return coincide;
+    });
+    
+    console.log(`📊 Filtro "${filtro}": ${filtrados.length} de ${eventosLista.length} eventos`);
+    setEventosFiltrados(filtrados);
+  }, []);
 
-    // Sincronizar inmediatamente al cargar
-    sincronizarYActualizar();
+  // Handler para cambiar filtro
+  const handleFiltroDepartamento = useCallback((nuevoFiltro: string | null) => {
+    console.log('🔄 Cambiando filtro de', departamentoFiltro, 'a', nuevoFiltro);
+    
+    // Guardar en localStorage
+    if (nuevoFiltro && nuevoFiltro !== 'Todos') {
+      localStorage.setItem('departamentoFiltro', nuevoFiltro);
+    } else {
+      localStorage.removeItem('departamentoFiltro');
+      nuevoFiltro = null;
+    }
 
-    // Sincronizar cada minuto
-    const interval = setInterval(sincronizarYActualizar, 60000);
+    setDepartamentoFiltro(nuevoFiltro);
+    
+    // Aplicar filtro a los eventos actuales
+    aplicarFiltro(eventos, nuevoFiltro);
+  }, [eventos, departamentoFiltro, aplicarFiltro]);
 
-    return () => clearInterval(interval);
-  }, [selectedPeriodo, fechaInicio, fechaFin]);
+  // Handler para descargar Excel
+  const handleDescargarExcel = async () => {
+    if (eventosFiltrados.length === 0) {
+      alert('No hay eventos para descargar');
+      return;
+    }
 
-
-  const handlePeriodoChange = (periodo: 'hoy' | '7dias' | '30dias' | 'personalizado') => {
-    setSelectedPeriodo(periodo);
-    if (periodo !== 'personalizado') {
-      cargarEventosDesdeBD(periodo);
+    setIsDescargandoExcel(true);
+    try {
+      let filtroInfo = '';
+      
+      if (departamentoFiltro) {
+        filtroInfo += `dep_${departamentoFiltro.replace(/\s+/g, '_')}`;
+      }
+      
+      if (selectedPeriodo !== 'hoy') {
+        filtroInfo += filtroInfo ? '_' : '';
+        if (selectedPeriodo === 'personalizado') {
+          const formatFecha = (fecha: string) => fecha.replace(/-/g, '');
+          filtroInfo += `${formatFecha(fechaInicio)}_a_${formatFecha(fechaFin)}`;
+        } else {
+          filtroInfo += selectedPeriodo;
+        }
+      }
+      
+      descargarExcel(eventosFiltrados, filtroInfo);
+      console.log(`✅ Excel descargado con ${eventosFiltrados.length} eventos`);
+    } catch (error) {
+      console.error('Error al descargar Excel:', error);
+      alert('Error al generar el archivo Excel. Por favor, intente nuevamente.');
+    } finally {
+      setIsDescargandoExcel(false);
     }
   };
 
+  // Handler para cambiar período
+  const handlePeriodoChange = (periodo: 'hoy' | '7dias' | '30dias' | 'personalizado') => {
+    setSelectedPeriodo(periodo);
+    if (periodo !== 'personalizado') {
+      cargarEventos(periodo);
+    }
+  };
+
+  // Handler para cambiar fechas
   const handleFechasChange = (inicio: string, fin: string) => {
     setFechaInicio(inicio);
     setFechaFin(fin);
   };
 
+  // Handler para refresh
   const handleRefresh = () => {
     if (selectedPeriodo === 'personalizado' && fechaInicio && fechaFin) {
-      cargarEventosDesdeBD('personalizado', fechaInicio, fechaFin);
+      cargarEventos('personalizado', fechaInicio, fechaFin);
     } else {
-      cargarEventosDesdeBD(selectedPeriodo);
+      cargarEventos(selectedPeriodo);
     }
   };
 
-  // Inicializar
+  // Cargar datos iniciales
   useEffect(() => {
-    const hoy = new Date().toISOString().split('T')[0];
-    setFechaInicio(hoy);
-    setFechaFin(hoy);
-    cargarEventosDesdeBD('hoy');
+    cargarEventos('hoy');
   }, []);
 
-  // Buscar automáticamente en modo personalizado
+  // Auto-buscar en personalizado cuando cambian las fechas
   useEffect(() => {
     if (selectedPeriodo === 'personalizado' && fechaInicio && fechaFin) {
-      cargarEventosDesdeBD('personalizado', fechaInicio, fechaFin);
+      cargarEventos('personalizado', fechaInicio, fechaFin);
     }
   }, [fechaInicio, fechaFin, selectedPeriodo]);
 
   return (
-    <>
-      <Navbar />
-      <div className="min-h-screen bg-gray-50">
-        <div className="container mx-auto px-4 py-8">
-          <Header
-            eventosCount={eventos.length}
-            onRefresh={handleRefresh}
-            isRefreshing={isLoading}
-            selectedPeriodo={selectedPeriodo}
-            onPeriodoChange={handlePeriodoChange}
-            onFechasChange={handleFechasChange}
-            fechaInicio={fechaInicio}
-            fechaFin={fechaFin}
-          />
+    <IdleSessionProtector timeoutMinutes={15}>
+      <>
+        <Navbar />
+        <div className="min-h-screen bg-gray-50">
+          <div className="container mx-auto">
+            <HeaderEventos
+              estadisticas={estadisticasDepartamentos}
+              departamentoFiltro={departamentoFiltro}
+              onFiltroChange={handleFiltroDepartamento}
+              eventosCount={eventosFiltrados.length}
+              onRefresh={handleRefresh}
+              isRefreshing={isLoading}
+              selectedPeriodo={selectedPeriodo}
+              onPeriodoChange={handlePeriodoChange}
+              onFechasChange={handleFechasChange}
+              fechaInicio={fechaInicio}
+              fechaFin={fechaFin}
+            />
 
-          <EventosTable
-            eventos={eventos}
-            isLoading={isLoading}
-          />
+            <div className="px-4 pb-8">
+              
+              {/* Botón de descarga */}
+              <div className="mb-4 flex justify-end">
+                <button
+                  onClick={handleDescargarExcel}
+                  disabled={isDescargandoExcel || eventosFiltrados.length === 0}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-lg font-medium flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                >
+                  {isDescargandoExcel ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Generando Excel...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Descargar Excel ({eventosFiltrados.length})
+                    </>
+                  )}
+                </button>
+              </div>
+              
+              <EventosTable
+                eventos={eventosFiltrados}
+                isLoading={isLoading}
+              />
+            </div>
+          </div>
         </div>
-      </div>
-    </>
+      </>
+    </IdleSessionProtector>
   );
 }

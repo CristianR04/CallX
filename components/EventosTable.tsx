@@ -7,16 +7,44 @@ interface TablaEventosProps {
   isLoading: boolean;
 }
 
+// ¡MANTÉN EXACTAMENTE LOS COLORES QUE TENÍAS ANTES!
+const getDepartamentoDisplay = (departamento: string | undefined) => {
+  if (!departamento || departamento === 'No asignado') {
+    return <span className="text-gray-400 text-sm">No asignado</span>;
+  }
+
+  // ¡TUS COLORES ORIGINALES!
+  const coloresDepartamentos: Record<string, string> = {
+    "Campana 5757": "bg-emerald-100 text-emerald-800 border border-emerald-200",
+    "Campana SAV": "bg-yellow-100 text-yellow-800 border border-yellow-200",
+    "Campana REFI": "bg-red-100 text-red-800 border border-red-200",
+    "Campana PL": "bg-indigo-100 text-indigo-800 border border-indigo-200",
+    "Campana PARLO": "bg-pink-100 text-pink-800 border border-pink-200",
+    "TI": "bg-pink-100 text-purple-800 border-purple-200",
+    "Teams Leaders": "bg-blue-100 text-blue-800 border-blue-200",
+    "Administrativo": "bg-gray-100 text-gray-800 border border-gray-200"
+    
+  };
+
+  const estilo = coloresDepartamentos[departamento] || "bg-gray-100 text-gray-800 border border-gray-200";
+
+  return (
+    <span className={`px-2.5 py-1 ${estilo} rounded-lg text-xs font-medium whitespace-nowrap`}>
+      {departamento}
+    </span>
+  );
+};
+
 // Componente para mostrar SOLO la información del almuerzo
 function InformacionAlmuerzo({ evento }: { evento: Evento }) {
   // Manejo seguro de propiedades que podrían no existir
   const horaSalidaAlmuerzo = evento.horaSalidaAlmuerzo || null;
   const horaEntradaAlmuerzo = evento.horaEntradaAlmuerzo || null;
   const duracionAlmuerzo = evento.duracionAlmuerzo || null;
-  
+
   const tieneSalidaAlmuerzo = horaSalidaAlmuerzo && horaSalidaAlmuerzo !== '--:--' && horaSalidaAlmuerzo !== '';
   const tieneEntradaAlmuerzo = horaEntradaAlmuerzo && horaEntradaAlmuerzo !== '--:--' && horaEntradaAlmuerzo !== '';
-  
+
   // Si no hay ningún registro de almuerzo
   if (!tieneSalidaAlmuerzo && !tieneEntradaAlmuerzo) {
     return (
@@ -28,7 +56,7 @@ function InformacionAlmuerzo({ evento }: { evento: Evento }) {
       </div>
     );
   }
-  
+
   // Si tiene almuerzo completo
   if (tieneSalidaAlmuerzo && tieneEntradaAlmuerzo && horaSalidaAlmuerzo && horaEntradaAlmuerzo) {
     // Calcular duración si no está incluida
@@ -40,7 +68,7 @@ function InformacionAlmuerzo({ evento }: { evento: Evento }) {
         const minutosSalida = h1 * 60 + m1;
         const minutosEntrada = h2 * 60 + m2;
         const duracionMin = minutosEntrada - minutosSalida;
-        
+
         if (duracionMin >= 0) {
           const horas = Math.floor(duracionMin / 60);
           const minutos = duracionMin % 60;
@@ -52,7 +80,7 @@ function InformacionAlmuerzo({ evento }: { evento: Evento }) {
         duracion = "--";
       }
     }
-    
+
     return (
       <div className="flex flex-col items-center min-h-[60px] justify-center">
         <div className="flex items-center mb-1">
@@ -74,7 +102,7 @@ function InformacionAlmuerzo({ evento }: { evento: Evento }) {
       </div>
     );
   }
-  
+
   // Si solo tiene salida de almuerzo
   if (tieneSalidaAlmuerzo && horaSalidaAlmuerzo) {
     return (
@@ -96,7 +124,7 @@ function InformacionAlmuerzo({ evento }: { evento: Evento }) {
       </div>
     );
   }
-  
+
   // Si solo tiene entrada de almuerzo
   if (tieneEntradaAlmuerzo && horaEntradaAlmuerzo) {
     return (
@@ -118,7 +146,7 @@ function InformacionAlmuerzo({ evento }: { evento: Evento }) {
       </div>
     );
   }
-  
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[60px]">
       <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
@@ -156,12 +184,12 @@ export function EventosTable({ eventos, isLoading }: TablaEventosProps) {
         const year = fecha.getFullYear();
         return `${day}-${month}-${year}`;
       }
-      
+
       if (fechaStr.includes('-') && fechaStr.length === 10) {
         const [year, month, day] = fechaStr.split('-');
         return `${day}-${month}-${year}`;
       }
-      
+
       const fecha = new Date(fechaStr);
       if (isNaN(fecha.getTime())) return '-';
       const day = fecha.getDate().toString().padStart(2, '0');
@@ -176,15 +204,15 @@ export function EventosTable({ eventos, isLoading }: TablaEventosProps) {
   return (
     <div className="overflow-x-auto rounded-lg shadow-lg bg-white">
       <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+        <thead className="bg-gradient-to-r from-slate-700 to-slate-800 text-white text-sm">
           <tr>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">ID</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Nombre</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Fecha</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Entrada</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Salida</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Almuerzo</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Campaña</th>
+            <th className="py-2.5 px-3 text-left font-semibold">ID</th>
+            <th className="py-2.5 px-3 text-left font-semibold">Nombre</th>
+            <th className="py-2.5 px-3 text-left font-semibold">Fecha</th>
+            <th className="py-2.5 px-3 text-left font-semibold">Entrada</th>
+            <th className="py-2.5 px-3 text-left font-semibold">Salida</th>
+            <th className="py-2.5 px-3 text-left font-semibold">Almuerzo</th>
+            <th className="py-2.5 px-3 text-left font-semibold">Campaña</th>
           </tr>
         </thead>
 
@@ -216,14 +244,14 @@ export function EventosTable({ eventos, isLoading }: TablaEventosProps) {
                   <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {evento.empleadoId}
                   </td>
-                  
+
                   <td className="px-4 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <div className="flex-shrink-0 h-8 w-8">
                         {evento.foto ? (
-                          <img 
-                            className="h-8 w-8 rounded-full object-cover" 
-                            src={evento.foto} 
+                          <img
+                            className="h-8 w-8 rounded-full object-cover"
+                            src={evento.foto}
                             alt={evento.nombre}
                             onError={(e) => {
                               e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(evento.nombre)}&background=random&color=fff&bold=true`;
@@ -242,7 +270,7 @@ export function EventosTable({ eventos, isLoading }: TablaEventosProps) {
                       </div>
                     </div>
                   </td>
-                  
+
                   <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700">
                     {formatFecha(evento.fecha)}
                   </td>
@@ -264,10 +292,8 @@ export function EventosTable({ eventos, isLoading }: TablaEventosProps) {
                   </td>
 
                   <td className="px-4 py-4 whitespace-nowrap">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gradient-to-r from-green-100 to-emerald-100 text-green-800">
-                      <i className="bi bi-building mr-1"></i>
-                      {evento.campaña || 'Sin grupo'}
-                    </span>
+                    {/* AQUÍ USAMOS EXACTAMENTE TU FUNCIÓN ORIGINAL */}
+                    {getDepartamentoDisplay(evento.campaña || 'No asignado')}
                   </td>
                 </tr>
               ))

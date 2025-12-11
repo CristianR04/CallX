@@ -2,10 +2,6 @@ import { NextResponse } from 'next/server';
 import { obtenerEventosDeHikvision } from '@/lib/db/eventos/database';
 
 export async function GET() {
-  console.log('\n' + '='.repeat(50));
-  console.log('📊 API EVENTOS HIKVISION - SOLO HOY');
-  console.log('='.repeat(50));
-
   const startTime = Date.now();
 
   try {
@@ -15,14 +11,13 @@ export async function GET() {
     const duration = ((endTime - startTime) / 1000).toFixed(2);
     const velocidad = eventos.length > 0 ? (eventos.length / duration).toFixed(1) : '0';
 
-    console.log(`\n✅ CONSULTA COMPLETADA EN ${duration}s`);
-    console.log(`   • Total eventos: ${eventos.length}`);
-    console.log(`   • Velocidad: ${velocidad} eventos/s`);
-
-    // Análisis adicional
-    const eventosAlmuerzo = eventos.filter(e => e.tipo?.includes('Almuerzo'));
-    console.log(`   • Eventos de almuerzo: ${eventosAlmuerzo.length}`);
-    console.log(`   • Fecha consultada: ${new Date().toISOString().split('T')[0]}`);
+    // Log solo en desarrollo
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[API] Eventos obtenidos: ${eventos.length} en ${duration}s`);
+      
+      const eventosAlmuerzo = eventos.filter(e => e.tipo?.includes('Almuerzo'));
+      console.log(`[API] Eventos almuerzo: ${eventosAlmuerzo.length}`);
+    }
 
     return NextResponse.json({
       success: true,
@@ -30,7 +25,7 @@ export async function GET() {
       fecha_consulta: new Date().toISOString().split('T')[0],
       estadisticas: {
         total_eventos: eventos.length,
-        eventos_almuerzo: eventosAlmuerzo.length,
+        eventos_almuerzo: eventos.filter(e => e.tipo?.includes('Almuerzo')).length,
         tiempo_segundos: parseFloat(duration),
         velocidad_eventos_por_segundo: parseFloat(velocidad)
       },
@@ -39,20 +34,30 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache, no-store'
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=60' // Cache de 5 minutos
       }
     });
 
   } catch (error) {
-    console.error('❌ ERROR:', error.message);
+    // Log de error estructurado
+    console.error(`[API Error] ${new Date().toISOString()} - ${error.message}`);
     
     return NextResponse.json({
       success: false,
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Error interno del servidor' 
+        : error.message,
       timestamp: new Date().toISOString()
     }, { 
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store'
+      }
     });
   }
 }
+
+
+export const runtime = 'nodejs'; 
+export const dynamic = 'force-dynamic'; 

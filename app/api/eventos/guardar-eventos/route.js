@@ -55,8 +55,24 @@ let intervaloId = null;
 // FUNCIONES DE SINCRONIZACIÓN
 // ================================================
 
+// Función para obtener campaña/departamento desde usuarios_hikvision
+async function obtenerCampañaPorDocumento(documento, client) {
+  if (!documento || documento === 'N/A') return 'Sin grupo';
+  
+  try {
+    const result = await client.query(
+      'SELECT departamento FROM usuarios_hikvision WHERE employee_no = $1',
+      [documento]
+    );
+    return result.rows.length > 0 ? result.rows[0].departamento : 'Sin grupo';
+  } catch (error) {
+    log.error(`Error obteniendo campaña para ${documento}:`, error.message);
+    return 'Sin grupo';
+  }
+}
+
 // Función para procesar eventos para la BD
-function procesarParaBD(eventos) {
+async function procesarParaBD(eventos, client) {
   log.info('🔄 Procesando eventos para BD...');
 
   const hoy = new Date().toISOString().split('T')[0];
@@ -97,7 +113,7 @@ function procesarParaBD(eventos) {
   const registrosBD = [];
 
   // Procesar cada documento
-  Object.values(eventosPorDocumento).forEach(grupo => {
+  for (const grupo of Object.values(eventosPorDocumento)) {
     grupo.eventos.sort((a, b) => a.hora_simple.localeCompare(b.hora_simple));
 
     const entradas = grupo.eventos.filter(e => e.tipo === 'Entrada');
@@ -173,6 +189,9 @@ function procesarParaBD(eventos) {
                    entradaAlmuerzo?.foto || 
                    '';
 
+      // Obtener la campaña/departamento del usuario
+      const campaña = await obtenerCampañaPorDocumento(grupo.documento, client);
+
       registrosBD.push({
         documento: grupo.documento,
         nombre: grupo.nombre,
@@ -184,14 +203,15 @@ function procesarParaBD(eventos) {
         tipo_evento: 'Asistencia',
         subtipo_evento: subtipo,
         dispositivo_ip: dispositivo,
-        imagen: foto
+        imagen: foto,
+        campaña: campaña
       });
 
-      log.info(`📝 Registro generado: ${grupo.documento} - ${subtipo}`);
+      log.info(`📝 Registro generado: ${grupo.documento} - ${subtipo} - Campaña: ${campaña}`);
     } else {
       log.warn(`❌ No se generó registro para ${grupo.documento}`);
     }
-  });
+  }
 
   const eventosSinDocumento = eventosHoy.filter(e => e.documento === 'N/A');
   if (eventosSinDocumento.length > 0) {
@@ -232,23 +252,11 @@ async function sincronizarEventos() {
 
     log.success(`${eventosHikvision.length} eventos de hoy obtenidos`);
 
-    const registrosBD = procesarParaBD(eventosHikvision);
-
-    if (registrosBD.length === 0) {
-      return {
-        eventos_obtenidos: eventosHikvision.length,
-        registros_procesados: 0,
-        nuevos_registros: 0,
-        registros_actualizados: 0,
-        tiempo_segundos: ((Date.now() - startTime) / 1000).toFixed(2),
-        mensaje: 'Eventos obtenidos pero no generaron registros válidos'
-      };
-    }
-
     client = new Client(DB_CONFIG);
     await client.connect();
     log.success('Conectado a PostgreSQL');
 
+    // Crear tabla si no existe, incluyendo columna campaña
     await client.query(`
       CREATE TABLE IF NOT EXISTS eventos_procesados (
         id SERIAL PRIMARY KEY,
@@ -263,12 +271,26 @@ async function sincronizarEventos() {
         subtipo_evento VARCHAR(50),
         dispositivo_ip VARCHAR(50),
         imagen TEXT,
+        campaña VARCHAR(100),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(documento, fecha)
       )
     `);
 
-    log.success('Tabla verificada/creada');
+    log.success('Tabla verificada/creada (incluye columna campaña)');
+
+    const registrosBD = await procesarParaBD(eventosHikvision, client);
+
+    if (registrosBD.length === 0) {
+      return {
+        eventos_obtenidos: eventosHikvision.length,
+        registros_procesados: 0,
+        nuevos_registros: 0,
+        registros_actualizados: 0,
+        tiempo_segundos: ((Date.now() - startTime) / 1000).toFixed(2),
+        mensaje: 'Eventos obtenidos pero no generaron registros válidos'
+      };
+    }
 
     log.info(`📝 Guardando ${registrosBD.length} registros...`);
 
@@ -294,8 +316,9 @@ async function sincronizarEventos() {
               subtipo_evento = $7,
               dispositivo_ip = $8,
               imagen = $9,
+              campaña = $10,
               created_at = CURRENT_TIMESTAMP
-            WHERE documento = $10 AND fecha = $11
+            WHERE documento = $11 AND fecha = $12
           `, [
             registro.nombre,
             registro.hora_entrada,
@@ -306,18 +329,19 @@ async function sincronizarEventos() {
             registro.subtipo_evento,
             registro.dispositivo_ip,
             registro.imagen,
+            registro.campaña,
             registro.documento,
             registro.fecha
           ]);
           actualizados++;
-          log.info(`   🔄 Actualizado: ${registro.documento}`);
+          log.info(`   🔄 Actualizado: ${registro.documento} - Campaña: ${registro.campaña}`);
         } else {
           await client.query(`
             INSERT INTO eventos_procesados (
               documento, nombre, fecha, hora_entrada, hora_salida,
               hora_salida_almuerzo, hora_entrada_almuerzo,
-              tipo_evento, subtipo_evento, dispositivo_ip, imagen
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              tipo_evento, subtipo_evento, dispositivo_ip, imagen, campaña
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           `, [
             registro.documento,
             registro.nombre,
@@ -329,10 +353,11 @@ async function sincronizarEventos() {
             registro.tipo_evento,
             registro.subtipo_evento,
             registro.dispositivo_ip,
-            registro.imagen
+            registro.imagen,
+            registro.campaña
           ]);
           insertados++;
-          log.success(`   ➕ Insertado: ${registro.documento}`);
+          log.success(`   ➕ Insertado: ${registro.documento} - Campaña: ${registro.campaña}`);
         }
 
       } catch (error) {

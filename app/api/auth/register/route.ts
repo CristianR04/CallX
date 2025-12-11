@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
   
   try {
     const body = await request.json()
-    const { documento, nombre, users, passward, fecha_registro, rol } = body
+    const { documento, nombre, users, passward, fecha_registro, rol, campaña } = body
 
     console.log("📊 Datos recibidos:", { 
       documento, 
@@ -14,7 +14,8 @@ export async function POST(request: NextRequest) {
       users, 
       passward: passward ? "***" : "null", 
       fecha_registro,
-      rol 
+      rol,
+      campaña: campaña ? campaña : "null (no aplica)"
     })
 
     // 1. VALIDACIONES BÁSICAS
@@ -28,18 +29,41 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 2. VALIDAR ROL (TI o Administrador)
-    const rolesPermitidos = ['TI', 'Administrador']
+    // 2. VALIDAR ROL
+    const rolesPermitidos = ['TI', 'Administrador', 'Team Leader', 'Supervisor']
     const rolFinal = rol && rolesPermitidos.includes(rol) 
       ? rol 
       : 'TI' // Valor por defecto
 
     console.log("✅ Rol asignado:", rolFinal)
 
+    // 3. VALIDAR CAMPAÑA SI ES TEAM LEADER
+    if (rolFinal === 'Team Leader') {
+      if (!campaña) {
+        console.log("❌ Campaña requerida para Team Leader")
+        return NextResponse.json(
+          { error: "La campaña es requerida para el rol Team Leader" },
+          { status: 400 }
+        )
+      }
+      
+      // Validar que la campaña sea un string válido
+      const campañasValidas = ['campaña_5757', 'campaña_SAV', 'campaña_REFI', 'campaña_PL', 'campaña_PARLO','campaña_ventas'];
+      if (!campañasValidas.includes(campaña)) {
+        console.log("❌ Campaña no válida:", campaña)
+        return NextResponse.json(
+          { error: "La campaña seleccionada no es válida" },
+          { status: 400 }
+        )
+      }
+      
+      console.log("✅ Campaña válida:", campaña)
+    }
+
     const client = await pool.connect()
     
     try {
-      // 3. VERIFICAR QUE LA TABLA 'auth' EXISTA
+      // 4. VERIFICAR QUE LA TABLA 'auth' EXISTA
       console.log("🔍 Verificando tabla 'auth'...")
       
       const tableCheck = await client.query(`
@@ -60,7 +84,7 @@ export async function POST(request: NextRequest) {
       
       console.log("✅ Tabla 'auth' encontrada")
 
-      // 4. VERIFICAR SI EL DOCUMENTO YA EXISTE
+      // 5. VERIFICAR SI EL DOCUMENTO YA EXISTE
       const docExists = await client.query(
         "SELECT id FROM auth WHERE documento = $1",
         [documento.trim()]
@@ -74,7 +98,7 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // 5. VERIFICAR SI EL USUARIO YA EXISTE
+      // 6. VERIFICAR SI EL USUARIO YA EXISTE
       const userExists = await client.query(
         "SELECT id FROM auth WHERE users = $1",
         [users.trim()]
@@ -88,7 +112,7 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // 6. INSERTAR NUEVO USUARIO CON ROL
+      // 7. INSERTAR NUEVO USUARIO CON ROL Y CAMPAÑA (AHORA COMO STRING)
       console.log("💾 Insertando nuevo usuario en tabla 'auth'...")
       
       const insertQuery = `
@@ -98,12 +122,22 @@ export async function POST(request: NextRequest) {
           users, 
           passward, 
           fecha_registro, 
-          rol
-        ) VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, documento, nombre, users, fecha_registro, rol
+          rol,
+          campaña
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, documento, nombre, users, fecha_registro, rol, campaña
       `
       
       console.log("📝 Query:", insertQuery)
+      console.log("📋 Valores:", [
+        documento.trim(),
+        nombre.trim(),
+        users.trim(),
+        passward,
+        fecha_registro || new Date().toISOString().split('T')[0],
+        rolFinal,
+        rolFinal === 'Team Leader' ? campaña : null
+      ])
       
       const result = await client.query(
         insertQuery,
@@ -113,7 +147,8 @@ export async function POST(request: NextRequest) {
           users.trim(),
           passward, // Texto plano
           fecha_registro || new Date().toISOString().split('T')[0],
-          rolFinal
+          rolFinal,
+          rolFinal === 'Team Leader' ? campaña : null // Ahora es string o null
         ]
       )
 
@@ -121,20 +156,22 @@ export async function POST(request: NextRequest) {
       console.log("✅ Usuario registrado exitosamente:", {
         id: newUser.id,
         usuario: newUser.users,
-        rol: newUser.rol
+        rol: newUser.rol,
+        campaña: newUser.campaña
       })
 
       return NextResponse.json(
         {
           success: true,
-          message: `${rolFinal} registrado exitosamente`,
+          message: `${rolFinal} registrado exitosamente${rolFinal === 'Team Leader' && campaña ? ` (Campaña: ${campaña})` : ''}`,
           user: {
             id: newUser.id,
             documento: newUser.documento,
             nombre: newUser.nombre,
             usuario: newUser.users,
             fecha_registro: newUser.fecha_registro,
-            rol: newUser.rol
+            rol: newUser.rol,
+            campaña: newUser.campaña
           }
         },
         { status: 201 }
@@ -148,21 +185,39 @@ export async function POST(request: NextRequest) {
         console.log("⚠️ Error de columna. Verificando estructura de tabla...")
         
         try {
-          // Obtener estructura real de la tabla
-          const actualColumns = await client.query(`
-            SELECT column_name, data_type 
+          // Verificar si la columna 'campaña' existe
+          const columnCheck = await client.query(`
+            SELECT column_name, data_type
             FROM information_schema.columns 
-            WHERE table_name = 'auth'
-            ORDER BY ordinal_position
+            WHERE table_name = 'auth' AND column_name = 'campaña'
           `)
           
-          console.log("📋 Estructura real de tabla 'auth':", actualColumns.rows)
+          if (columnCheck.rows.length === 0) {
+            console.log("❌ Columna 'campaña' no existe en tabla 'auth'")
+            return NextResponse.json(
+              { 
+                error: "La columna 'campaña' no existe en la tabla. Por favor, agrega la columna primero.",
+                sugerencia: "Ejecuta: ALTER TABLE auth ADD COLUMN campaña VARCHAR(50);"
+              },
+              { status: 500 }
+            )
+          } else {
+            console.log("⚠️ Tipo de columna 'campaña':", columnCheck.rows[0].data_type)
+            // Si la columna existe pero es de tipo incorrecto, sugerir cambio
+            if (columnCheck.rows[0].data_type !== 'character varying' && 
+                columnCheck.rows[0].data_type !== 'text') {
+              return NextResponse.json(
+                { 
+                  error: `La columna 'campaña' es de tipo ${columnCheck.rows[0].data_type}. Se requiere VARCHAR o TEXT.`,
+                  sugerencia: "Ejecuta: ALTER TABLE auth ALTER COLUMN campaña TYPE VARCHAR(50);"
+                },
+                { status: 500 }
+              )
+            }
+          }
           
           return NextResponse.json(
-            { 
-              error: "Error en la estructura de la tabla 'auth'.",
-              estructura: actualColumns.rows.map(c => `${c.column_name} (${c.data_type})`)
-            },
+            { error: "Error en la estructura de la tabla 'auth'." },
             { status: 500 }
           )
         } catch (e) {
@@ -211,7 +266,8 @@ export async function GET() {
         SELECT 
           column_name,
           data_type,
-          is_nullable
+          is_nullable,
+          character_maximum_length
         FROM information_schema.columns
         WHERE table_name = 'auth'
         ORDER BY ordinal_position
@@ -222,11 +278,21 @@ export async function GET() {
         SELECT COUNT(*) as total FROM auth
       `)
       
+      // Verificar valores únicos de campaña
+      const campañasUnicas = await client.query(`
+        SELECT DISTINCT campaña, COUNT(*) as total
+        FROM auth 
+        WHERE campaña IS NOT NULL
+        GROUP BY campaña
+        ORDER BY campaña
+      `)
+      
       return NextResponse.json({
         success: true,
         table: 'auth',
         estructura: tableStructure.rows,
         totalUsuarios: usersCount.rows[0].total,
+        campañas: campañasUnicas.rows,
         mensaje: "API de registro funcionando correctamente"
       })
       
