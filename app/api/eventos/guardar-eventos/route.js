@@ -12,34 +12,26 @@ const DB_CONFIG = {
 };
 
 // ================================================
-// FUNCIONES DE UTILIDAD
+// FUNCIONES DE UTILIDAD (SIN ZONA HORARIA)
 // ================================================
 
-const formatHoraColombia = (fecha = new Date()) => {
-  const fechaColombia = new Date(fecha);
-  fechaColombia.setHours(fechaColombia.getHours() - 5);
-  return fechaColombia.toLocaleString('es-CO');
-};
-
-const convertirUTCaColombia = (fechaUTC) => {
-  if (!fechaUTC) return null;
-  const fecha = new Date(fechaUTC);
-  fecha.setHours(fecha.getHours() - 5);
-  return fecha.toISOString();
+// Función simple para obtener hora local
+const getCurrentDateTime = () => {
+  return new Date().toLocaleString('es-CO');
 };
 
 const log = {
   info: (...args) => {
-    console.log(`[${formatHoraColombia()}]`, ...args);
+    console.log(`[${getCurrentDateTime()}]`, ...args);
   },
   error: (...args) => {
-    console.error(`[${formatHoraColombia()}] ❌`, ...args);
+    console.error(`[${getCurrentDateTime()}] ❌`, ...args);
   },
   success: (...args) => {
-    console.log(`[${formatHoraColombia()}] ✅`, ...args);
+    console.log(`[${getCurrentDateTime()}] ✅`, ...args);
   },
   warn: (...args) => {
-    console.warn(`[${formatHoraColombia()}] ⚠️`, ...args);
+    console.warn(`[${getCurrentDateTime()}] ⚠️`, ...args);
   }
 };
 
@@ -389,7 +381,7 @@ async function sincronizarEventos() {
       registros_actualizados: actualizados,
       tiempo_segundos: parseFloat(tiempoTotal),
       fecha_sincronizada: new Date().toISOString().split('T')[0],
-      hora_sincronizacion_colombia: formatHoraColombia()
+      hora_sincronizacion: getCurrentDateTime()
     };
 
   } catch (error) {
@@ -413,7 +405,7 @@ async function ejecutarSincronizacionAutomatica() {
   try {
     log.info('\n' + '-'.repeat(50));
     log.info('🔄 EJECUTANDO SINCRONIZACIÓN AUTOMÁTICA');
-    log.info(`🕐 Hora Colombia: ${formatHoraColombia()}`);
+    log.info(`🕐 Hora: ${getCurrentDateTime()}`);
     log.info('-'.repeat(50));
 
     const resultado = await sincronizarEventos();
@@ -446,7 +438,7 @@ function iniciarSincronizacionAutomatica() {
   log.info('\n' + '='.repeat(70));
   log.info('⏰ INICIANDO SINCRONIZACIÓN AUTOMÁTICA (Cada 1 minuto)');
   log.info('='.repeat(70));
-  log.info(`🕐 Hora Colombia: ${formatHoraColombia()}`);
+  log.info(`🕐 Hora: ${getCurrentDateTime()}`);
   log.info('='.repeat(70));
 
   sincronizacionActiva = true;
@@ -504,20 +496,15 @@ export async function GET(request) {
         sincronizacion_automatica: {
           activa: sincronizacionActiva,
           ultima_ejecucion: ultimaEjecucion,
-          ultima_ejecucion_colombia: convertirUTCaColombia(ultimaEjecucion),
           proxima_ejecucion: proximaEjecucion ? proximaEjecucion.toISOString() : null,
-          proxima_ejecucion_colombia: proximaEjecucion ? convertirUTCaColombia(proximaEjecucion.toISOString()) : null,
           intervalo_minutos: 1,
           configuracion: {
-            dispositivos: ['172.31.0.165', '172.31.0.164'],
-            zona_horaria: 'America/Bogota (UTC-5)'
+            dispositivos: ['172.31.0.165', '172.31.0.164']
           }
         },
         timestamps: {
-          servidor_utc: new Date().toISOString(),
-          servidor_local: formatHoraColombia(),
-          colombia: convertirUTCaColombia(new Date().toISOString()),
-          diferencia_horas: 'Colombia = UTC - 5 horas'
+          servidor: new Date().toISOString(),
+          hora_local: getCurrentDateTime()
         }
       });
     }
@@ -529,13 +516,13 @@ export async function GET(request) {
           success: true,
           message: 'Sincronización automática iniciada',
           intervalo: '1 minuto',
-          hora_colombia: formatHoraColombia()
+          hora: getCurrentDateTime()
         });
       } else {
         return NextResponse.json({
           success: true,
           message: 'La sincronización automática ya está activa',
-          hora_colombia: formatHoraColombia()
+          hora: getCurrentDateTime()
         });
       }
     }
@@ -546,13 +533,13 @@ export async function GET(request) {
         return NextResponse.json({
           success: true,
           message: 'Sincronización automática detenida',
-          hora_colombia: formatHoraColombia()
+          hora: getCurrentDateTime()
         });
       } else {
         return NextResponse.json({
           success: true,
           message: 'La sincronización automática no está activa',
-          hora_colombia: formatHoraColombia()
+          hora: getCurrentDateTime()
         });
       }
     }
@@ -564,7 +551,7 @@ export async function GET(request) {
       return NextResponse.json({
         success: true,
         message: 'Sincronización forzada ejecutada',
-        hora_colombia: formatHoraColombia(),
+        hora: getCurrentDateTime(),
         ...resultado
       });
     }
@@ -576,7 +563,7 @@ export async function GET(request) {
       success: true,
       message: 'Sincronización de eventos de hoy completada',
       timestamp: new Date().toISOString(),
-      hora_colombia: formatHoraColombia(),
+      hora: getCurrentDateTime(),
       ...resultado
     }, {
       status: 200,
@@ -593,7 +580,7 @@ export async function GET(request) {
       success: false,
       error: error.message,
       timestamp: new Date().toISOString(),
-      hora_colombia: formatHoraColombia()
+      hora: getCurrentDateTime()
     }, {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
@@ -624,7 +611,7 @@ function iniciarAutomaticamente() {
   }
 
   log.info('\n🔍 INICIANDO SINCRONIZACIÓN AUTOMÁTICA...');
-  log.info(`🕐 Hora Colombia: ${formatHoraColombia()}`);
+  log.info(`🕐 Hora: ${getCurrentDateTime()}`);
   log.info(`🌍 Entorno: ${process.env.NODE_ENV || 'development'}`);
 
   setTimeout(() => {
