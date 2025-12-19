@@ -218,8 +218,7 @@ async function sincronizarEventos() {
               subtipo_evento = $7,
               dispositivo_ip = $8,
               imagen = $9,
-              campaña = $10,
-              updated_at = CURRENT_TIMESTAMP
+              campaña = $10
             WHERE documento = $11 AND fecha = $12
           `, [
             registro.nombre,

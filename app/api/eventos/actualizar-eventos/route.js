@@ -1,5 +1,3 @@
-
-
 import { NextResponse } from 'next/server';
 import { Client } from 'pg';
 import { obtenerEventosDeHikvision } from '@/lib/db/eventos/database';
@@ -19,15 +17,11 @@ const DB_CONFIG = {
 
 const formatHoraColombia = (fecha = new Date()) => {
   const fechaColombia = new Date(fecha);
-  fechaColombia.setHours(fechaColombia.getHours() - 5);
-  return fechaColombia.toLocaleString('es-CO');
-};
-
-const convertirUTCaColombia = (fechaUTC) => {
-  if (!fechaUTC) return null;
-  const fecha = new Date(fechaUTC);
-  fecha.setHours(fecha.getHours() - 5);
-  return fecha.toISOString();
+  // Colombia es UTC-5
+  return fechaColombia.toLocaleString('es-CO', { 
+    timeZone: 'America/Bogota',
+    hour12: false 
+  });
 };
 
 const log = {
@@ -46,18 +40,44 @@ const log = {
 };
 
 // ================================================
-// NUEVA FUNCIÓN PARA OBTENER EVENTOS POR DÍA
+// FUNCIÓN PARA OBTENER EVENTOS DE AYER
+// ================================================
+
+async function obtenerEventosDeAyer() {
+  try {
+    // Calcular fecha de ayer
+    const hoy = new Date();
+    const ayer = new Date(hoy);
+    ayer.setDate(hoy.getDate() - 1);
+    const fechaAyer = ayer.toISOString().split('T')[0];
+    
+    log.info(`📅 Buscando eventos de ayer: ${fechaAyer}`);
+    
+    // Usar la función existente para obtener eventos de un día específico
+    const eventosAyer = await obtenerEventosDeHikvisionPorDia(fechaAyer);
+    
+    if (eventosAyer.length === 0) {
+      log.warn(`⚠️ No se encontraron eventos para ayer (${fechaAyer})`);
+    } else {
+      log.success(`✅ ${eventosAyer.length} eventos obtenidos para ayer`);
+    }
+    
+    return eventosAyer;
+  } catch (error) {
+    log.error(`Error obteniendo eventos de ayer: ${error.message}`);
+    return [];
+  }
+}
+
+// ================================================
+// FUNCIÓN MEJORADA PARA OBTENER EVENTOS POR DÍA
 // ================================================
 
 async function obtenerEventosDeHikvisionPorDia(fecha) {
   const startTime = Date.now();
-  const logger = {
-    debug: (...args) => console.log(...args),
-    error: (...args) => console.error(...args)
-  };
-
+  
   try {
-    const formatHikvisionDate = (date) => date.toISOString().replace(/\.\d{3}Z$/, '');
+    log.info(`🔍 Consultando eventos para: ${fecha}`);
     
     // Importar DigestFetch dinámicamente
     const DigestFetchModule = await import('digest-fetch');
@@ -76,16 +96,19 @@ async function obtenerEventosDeHikvisionPorDia(fecha) {
       const baseUrl = `https://${deviceIp}/ISAPI/AccessControl/AcsEvent?format=json`;
       const client = createDigestClient();
       
-      logger.debug(`Consultando dispositivo: ${deviceIp} para fecha: ${fecha}`);
+      log.info(`📡 Consultando dispositivo: ${deviceIp}`);
 
-      const inicio = new Date(`${fecha}T00:00:00Z`);
-      const fin = new Date(`${fecha}T23:59:59Z`);
+      // Ajustar para zona horaria correcta (UTC)
+      const inicio = new Date(`${fecha}T05:00:00Z`); // 00:00 Colombia = 05:00 UTC
+      const fin = new Date(`${fecha}T28:59:59Z`); // 23:59 Colombia del día siguiente = 04:59 UTC
+      
+      const formatHikvisionDate = (date) => date.toISOString().replace(/\.\d{3}Z$/, '');
 
       let allEvents = [];
       let position = 0;
       let batchNumber = 1;
       let totalMatches = null;
-      let maxBatches = 20; // Límite de batches para evitar bucles infinitos
+      let maxBatches = 30;
 
       while (batchNumber <= maxBatches) {
         try {
@@ -93,7 +116,7 @@ async function obtenerEventosDeHikvisionPorDia(fecha) {
             AcsEventCond: {
               searchID: `search_${deviceIp}_${Date.now()}`,
               searchResultPosition: position,
-              maxResults: 100, // Máximo por batch
+              maxResults: 100,
               major: 5,
               minor: 75,
               startTime: formatHikvisionDate(inicio),
@@ -114,10 +137,10 @@ async function obtenerEventosDeHikvisionPorDia(fecha) {
           if (!res.ok) {
             const errorText = await res.text();
             if (res.status === 400 || res.status === 404) {
-              logger.debug(`Dispositivo ${deviceIp} sin eventos para ${fecha}`);
+              log.warn(`Dispositivo ${deviceIp} sin eventos para ${fecha}`);
               break;
             }
-            logger.error(`Error HTTP ${res.status}: ${errorText.substring(0, 100)}`);
+            log.error(`Error HTTP ${res.status}: ${errorText.substring(0, 100)}`);
             break;
           }
 
@@ -132,11 +155,10 @@ async function obtenerEventosDeHikvisionPorDia(fecha) {
 
           if (batchNumber === 1) {
             totalMatches = data?.AcsEvent?.totalMatches || 0;
-            logger.debug(`Total reportado por ${deviceIp}: ${totalMatches}`);
+            log.info(`📊 Total reportado por ${deviceIp}: ${totalMatches}`);
           }
 
           if (batchSize === 0) {
-            // Si es el primer batch y hay totalMatches, intentar desde posición 1
             if (batchNumber === 1 && totalMatches > 0) {
               position = 1;
               continue;
@@ -150,21 +172,20 @@ async function obtenerEventosDeHikvisionPorDia(fecha) {
             batchNumber
           })));
 
-          logger.debug(`Lote ${batchNumber}: ${batchSize} eventos, acumulados: ${allEvents.length}`);
+          log.info(`📦 Lote ${batchNumber}: ${batchSize} eventos, acumulados: ${allEvents.length}`);
 
           if (totalMatches > 0 && allEvents.length >= totalMatches) {
-            logger.debug(`Obtenidos todos los ${totalMatches} eventos`);
+            log.info(`🎯 Obtenidos todos los ${totalMatches} eventos`);
             break;
           }
 
           position += batchSize;
           batchNumber++;
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 300));
 
         } catch (error) {
-          logger.error(`Error en lote ${batchNumber}: ${error.message}`);
+          log.error(`Error en lote ${batchNumber}: ${error.message}`);
           
-          // Si es error de posición, intentar desde la siguiente
           if (error.message.includes('position') || error.message.includes('range')) {
             position += 1;
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -186,119 +207,171 @@ async function obtenerEventosDeHikvisionPorDia(fecha) {
           totalReportado: totalMatches,
           fecha: fecha
         });
+        log.success(`✅ ${deviceIp}: ${allEvents.length} eventos obtenidos`);
+      } else {
+        log.warn(`⚠️ ${deviceIp}: Sin eventos para ${fecha}`);
       }
-
-      logger.debug(`${deviceIp}: ${allEvents.length} eventos obtenidos para ${fecha}`);
       
       // Delay entre dispositivos
       if (deviceIp !== dispositivos[dispositivos.length - 1]) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 800));
       }
     }
 
-    // Procesar eventos
-    const eventosProcesados = [];
+    // Procesar eventos obtenidos
+    const eventosProcesados = procesarEventosCrudos(resultadosConsulta, fecha);
     
-    for (const resultado of resultadosConsulta) {
-      const { dispositivo } = resultado;
-
-      for (const evento of resultado.eventos) {
-        try {
-          if (!evento.time) continue;
-
-          const partes = evento.time.split('T');
-          if (partes.length !== 2) continue;
-
-          let fechaEvento = partes[0];
-          const tiempoParte = partes[1];
-
-          // Verificar que la fecha coincida con la solicitada
-          if (fechaEvento !== fecha) {
-            // A veces los dispositivos devuelven eventos de días cercanos
-            const fechaEventoObj = new Date(fechaEvento);
-            const fechaSolicitadaObj = new Date(fecha);
-            const diffDias = Math.abs((fechaEventoObj - fechaSolicitadaObj) / (1000 * 60 * 60 * 24));
-            
-            if (diffDias > 1) {
-              // Descartar eventos que no son del día solicitado
-              continue;
-            }
-          }
-
-          let horaLocal;
-          if (tiempoParte.includes('-') || tiempoParte.includes('+')) {
-            const match = tiempoParte.match(/^(\d{2}:\d{2}:\d{2})/);
-            if (match) horaLocal = match[1];
-          } else if (tiempoParte.includes('Z')) {
-            horaLocal = tiempoParte.substring(0, 8);
-          } else {
-            horaLocal = tiempoParte.substring(0, 8);
-          }
-
-          if (!horaLocal) continue;
-
-          // Determinar tipo de evento
-          let tipo = 'Evento';
-          const label = evento.label || '';
-          const attendanceStatus = evento.attendanceStatus || '';
-
-          if (attendanceStatus === 'breakOut') tipo = 'Salida Almuerzo';
-          else if (attendanceStatus === 'breakIn') tipo = 'Entrada Almuerzo';
-          else if (label.toLowerCase().includes('almuerzo')) {
-            if (label.toLowerCase().includes('salida') || label.toLowerCase().includes('a almuerzo')) {
-              tipo = 'Salida Almuerzo';
-            } else if (label.toLowerCase().includes('entrada') || label.toLowerCase().includes('de almuerzo')) {
-              tipo = 'Entrada Almuerzo';
-            }
-          } else if (label.toLowerCase().includes('salida')) tipo = 'Salida';
-          else if (label.toLowerCase().includes('entrada')) tipo = 'Entrada';
-          else if (evento.minor === 75) tipo = evento.major === 5 ? 'Salida' : 'Entrada';
-
-          // Documento del empleado
-          let documento = 'N/A';
-          if (evento.employeeNoString && evento.employeeNoString.trim() !== '') {
-            documento = evento.employeeNoString.trim();
-          } else if (evento.cardNo && evento.cardNo.trim() !== '') {
-            documento = evento.cardNo.trim();
-          }
-
-          const nombre = evento.name ? evento.name.trim() : 'Sin nombre';
-
-          eventosProcesados.push({
-            dispositivo,
-            nombre,
-            documento,
-            fecha: fechaEvento, // Usar la fecha real del evento
-            hora: `${fechaEvento}T${horaLocal}Z`,
-            hora_simple: horaLocal,
-            tipo,
-            departamento: evento.department || 'Sin departamento',
-            foto: evento.pictureURL || '',
-            label_original: label,
-            attendance_status_original: attendanceStatus,
-            time_original: evento.time
-          });
-
-        } catch (error) {
-          logger.error(`Error procesando evento: ${error.message}`);
-        }
-      }
-    }
-
     const tiempoTotal = ((Date.now() - startTime) / 1000).toFixed(2);
-    logger.debug(`Consulta para ${fecha} completada en ${tiempoTotal}s`);
-    logger.debug(`Eventos obtenidos para ${fecha}: ${eventosProcesados.length}`);
+    log.success(`📈 Consulta para ${fecha} completada en ${tiempoTotal}s`);
+    log.info(`🎯 Total eventos procesados: ${eventosProcesados.length}`);
 
     return eventosProcesados;
 
   } catch (error) {
-    logger.error(`Error en obtenerEventosDeHikvisionPorDia para ${fecha}: ${error.message}`);
+    log.error(`❌ Error obteniendo eventos para ${fecha}: ${error.message}`);
     return [];
   }
 }
 
 // ================================================
-// FUNCIÓN PARA OBTENER EVENTOS POR RANGO (DÍA POR DÍA)
+// FUNCIÓN PARA PROCESAR EVENTOS CRUDOS
+// ================================================
+
+function procesarEventosCrudos(resultadosConsulta, fechaSolicitada) {
+  const eventosProcesados = [];
+  
+  log.info(`🔄 Procesando eventos crudos para fecha: ${fechaSolicitada}`);
+
+  for (const resultado of resultadosConsulta) {
+    const { dispositivo, eventos } = resultado;
+
+    for (const evento of eventos) {
+      try {
+        if (!evento.time) continue;
+
+        const partes = evento.time.split('T');
+        if (partes.length !== 2) continue;
+
+        const fechaEvento = partes[0];
+        const tiempoParte = partes[1];
+
+        // Convertir fecha del evento a Colombia
+        const fechaEventoObj = new Date(evento.time);
+        fechaEventoObj.setHours(fechaEventoObj.getHours() - 5); // UTC a Colombia
+        
+        const fechaEventoColombia = fechaEventoObj.toISOString().split('T')[0];
+        
+        // Verificar si el evento corresponde al día solicitado (en hora Colombia)
+        if (fechaEventoColombia !== fechaSolicitada) {
+          // Solo mostrar logs si hay diferencia significativa
+          const diffDias = Math.abs((new Date(fechaEventoColombia) - new Date(fechaSolicitada)) / (1000 * 60 * 60 * 24));
+          if (diffDias >= 1) {
+            log.warn(`⚠️ Evento fuera de rango: ${fechaEvento} UTC → ${fechaEventoColombia} CO (solicitado: ${fechaSolicitada})`);
+          }
+          continue;
+        }
+
+        let horaLocal;
+        if (tiempoParte.includes('-') || tiempoParte.includes('+')) {
+          const match = tiempoParte.match(/^(\d{2}:\d{2}:\d{2})/);
+          if (match) horaLocal = match[1];
+        } else if (tiempoParte.includes('Z')) {
+          horaLocal = tiempoParte.substring(0, 8);
+        } else {
+          horaLocal = tiempoParte.substring(0, 8);
+        }
+
+        if (!horaLocal) continue;
+
+        // MEJORAR LA CLASIFICACIÓN DE TIPOS
+        let tipo = 'Evento';
+        const label = evento.label || '';
+        const attendanceStatus = evento.attendanceStatus || '';
+        
+        // Log para debug
+        if (evento.employeeNoString) {
+          log.info(`👤 ${evento.employeeNoString}: label="${label}", attendanceStatus="${attendanceStatus}"`);
+        }
+
+        // MEJOR LÓGICA DE CLASIFICACIÓN
+        if (attendanceStatus === 'breakOut') {
+          tipo = 'Salida Almuerzo';
+        } else if (attendanceStatus === 'breakIn') {
+          tipo = 'Entrada Almuerzo';
+        } else if (label.toLowerCase().includes('entrada')) {
+          if (label.toLowerCase().includes('almuerzo') || label.toLowerCase().includes('lunch')) {
+            tipo = 'Entrada Almuerzo';
+          } else {
+            tipo = 'Entrada';
+          }
+        } else if (label.toLowerCase().includes('salida')) {
+          if (label.toLowerCase().includes('almuerzo') || label.toLowerCase().includes('lunch')) {
+            tipo = 'Salida Almuerzo';
+          } else {
+            tipo = 'Salida';
+          }
+        } 
+        // Si no hay label claro, usar major/minor
+        else if (evento.minor === 75) {
+          if (evento.major === 5 || evento.major === 1) {
+            tipo = 'Entrada';
+          } else if (evento.major === 6 || evento.major === 2) {
+            tipo = 'Salida';
+          }
+        }
+        // Si aún no está clasificado, usar valores por defecto
+        else if (evento.major === 1 || evento.cardReaderNo === 1) {
+          tipo = 'Entrada';
+        } else if (evento.major === 2 || evento.cardReaderNo === 2) {
+          tipo = 'Salida';
+        }
+
+        // Documento del empleado
+        let documento = 'N/A';
+        if (evento.employeeNoString && evento.employeeNoString.trim() !== '') {
+          documento = evento.employeeNoString.trim();
+        } else if (evento.cardNo && evento.cardNo.trim() !== '') {
+          documento = evento.cardNo.trim();
+        } else if (evento.employeeNo) {
+          documento = evento.employeeNo.toString();
+        }
+
+        const nombre = evento.name ? evento.name.trim() : 'Sin nombre';
+
+        eventosProcesados.push({
+          dispositivo,
+          nombre,
+          documento,
+          fecha: fechaEventoColombia, // Usar fecha en hora Colombia
+          hora: `${fechaEventoColombia}T${horaLocal}`,
+          hora_simple: horaLocal,
+          tipo,
+          departamento: evento.department || 'Sin departamento',
+          foto: evento.pictureURL || '',
+          label_original: label,
+          attendance_status_original: attendanceStatus,
+          time_original: evento.time
+        });
+
+      } catch (error) {
+        log.error(`Error procesando evento crudo: ${error.message}`);
+      }
+    }
+  }
+
+  // Mostrar resumen
+  const conteoTipos = eventosProcesados.reduce((acc, e) => {
+    acc[e.tipo] = (acc[e.tipo] || 0) + 1;
+    return acc;
+  }, {});
+  
+  log.info(`📊 Resumen tipos de eventos para ${fechaSolicitada}:`, conteoTipos);
+
+  return eventosProcesados;
+}
+
+// ================================================
+// FUNCIÓN PARA OBTENER EVENTOS POR RANGO
 // ================================================
 
 async function obtenerEventosDeHikvisionPorRango(fechaInicio, fechaFin) {
@@ -306,7 +379,6 @@ async function obtenerEventosDeHikvisionPorRango(fechaInicio, fechaFin) {
   
   const inicio = new Date(fechaInicio);
   const fin = new Date(fechaFin);
-  
   const todosEventos = [];
   
   // Procesar día por día
@@ -315,7 +387,7 @@ async function obtenerEventosDeHikvisionPorRango(fechaInicio, fechaFin) {
   while (fechaActual <= fin) {
     const fechaStr = fechaActual.toISOString().split('T')[0];
     
-    log.info(`📅 Consultando fecha: ${fechaStr}`);
+    log.info(`\n📅 Consultando fecha: ${fechaStr}`);
     
     const eventosDelDia = await obtenerEventosDeHikvisionPorDia(fechaStr);
     
@@ -323,36 +395,27 @@ async function obtenerEventosDeHikvisionPorRango(fechaInicio, fechaFin) {
       log.success(`✅ ${fechaStr}: ${eventosDelDia.length} eventos obtenidos`);
       todosEventos.push(...eventosDelDia);
     } else {
-      log.warn(`⚠️  ${fechaStr}: Sin eventos`);
+      log.warn(`⚠️ ${fechaStr}: Sin eventos`);
     }
     
     // Pasar al siguiente día
     fechaActual.setDate(fechaActual.getDate() + 1);
     
-    // Delay entre días para no sobrecargar los dispositivos
+    // Delay entre días
     if (fechaActual <= fin) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
   }
   
-  log.info(`📊 Total eventos obtenidos: ${todosEventos.length}`);
+  log.info(`\n📈 Total eventos obtenidos: ${todosEventos.length}`);
   
   return todosEventos;
 }
 
 // ================================================
-// VARIABLES DE CONTROL PARA SINCRONIZACIÓN AUTOMÁTICA
-// ================================================
-
-let sincronizacionActiva = false;
-let ultimaEjecucion = null;
-let intervaloId = null;
-
-// ================================================
 // FUNCIONES DE SINCRONIZACIÓN
 // ================================================
 
-// Función para obtener campaña/departamento desde usuarios_hikvision
 async function obtenerCampañaPorDocumento(documento, client) {
   if (!documento || documento === 'N/A') return 'Sin grupo';
   
@@ -368,18 +431,14 @@ async function obtenerCampañaPorDocumento(documento, client) {
   }
 }
 
-// Función para procesar eventos para la BD
 async function procesarParaBD(eventos, client) {
   log.info('🔄 Procesando eventos para BD...');
 
   // Agrupar eventos por fecha y documento
   const eventosPorFechaDocumento = {};
 
-  // Clasificar eventos por fecha y documento
-  eventos.forEach((evento, index) => {
-    if (evento.documento === 'N/A') {
-      return;
-    }
+  eventos.forEach((evento) => {
+    if (evento.documento === 'N/A') return;
 
     const key = `${evento.fecha}_${evento.documento}`;
     if (!eventosPorFechaDocumento[key]) {
@@ -390,7 +449,6 @@ async function procesarParaBD(eventos, client) {
         eventos: []
       };
     }
-
     eventosPorFechaDocumento[key].eventos.push(evento);
   });
 
@@ -407,75 +465,47 @@ async function procesarParaBD(eventos, client) {
     const salidas = grupo.eventos.filter(e => e.tipo === 'Salida');
     const entradasAlmuerzo = grupo.eventos.filter(e => e.tipo === 'Entrada Almuerzo');
     const salidasAlmuerzo = grupo.eventos.filter(e => e.tipo === 'Salida Almuerzo');
-    const otrosEventos = grupo.eventos.filter(e => 
-      !['Entrada', 'Salida', 'Entrada Almuerzo', 'Salida Almuerzo'].includes(e.tipo)
-    );
-
-    // Solo mostrar logs para grupos con eventos
-    if (entradas.length > 0 || salidas.length > 0 || entradasAlmuerzo.length > 0 || salidasAlmuerzo.length > 0) {
-      log.info(`📋 ${grupo.fecha} - ${grupo.documento} - ${grupo.nombre}:`);
-      if (entradas.length > 0) log.info(`   • Entradas: ${entradas.length} - ${entradas.map(e => e.hora_simple).join(', ')}`);
-      if (salidas.length > 0) log.info(`   • Salidas: ${salidas.length} - ${salidas.map(e => e.hora_simple).join(', ')}`);
-      if (salidasAlmuerzo.length > 0) log.info(`   • Salidas Almuerzo: ${salidasAlmuerzo.length} - ${salidasAlmuerzo.map(e => e.hora_simple).join(', ')}`);
-      if (entradasAlmuerzo.length > 0) log.info(`   • Entradas Almuerzo: ${entradasAlmuerzo.length} - ${entradasAlmuerzo.map(e => e.hora_simple).join(', ')}`);
-    }
 
     const primeraEntrada = entradas[0];
     const ultimaSalida = salidas[salidas.length - 1] || salidas[0];
     const salidaAlmuerzo = salidasAlmuerzo[0];
     const entradaAlmuerzo = entradasAlmuerzo[0];
 
-    let subtipo = '';
+    // DEBUG: Mostrar información del grupo
+    log.info(`📊 ${grupo.fecha} - ${grupo.documento}:`);
+    log.info(`   Entradas: ${entradas.length} - ${entradas.map(e => e.hora_simple).join(', ')}`);
+    log.info(`   Salidas: ${salidas.length} - ${salidas.map(e => e.hora_simple).join(', ')}`);
+    log.info(`   Salidas Almuerzo: ${salidasAlmuerzo.length} - ${salidasAlmuerzo.map(e => e.hora_simple).join(', ')}`);
+    log.info(`   Entradas Almuerzo: ${entradasAlmuerzo.length} - ${entradasAlmuerzo.map(e => e.hora_simple).join(', ')}`);
 
+    let subtipo = 'Sin registros';
+
+    // Determinar subtipo basado en eventos encontrados
     if (primeraEntrada && ultimaSalida && salidaAlmuerzo && entradaAlmuerzo) {
       subtipo = 'Jornada completa';
     } else if (primeraEntrada && ultimaSalida && !salidaAlmuerzo && !entradaAlmuerzo) {
-      subtipo = 'Sin almuerzo registrado';
-    } else if (primeraEntrada && !ultimaSalida && !salidaAlmuerzo && !entradaAlmuerzo) {
+      subtipo = 'Sin almuerzo';
+    } else if (primeraEntrada && !ultimaSalida) {
       subtipo = 'Solo entrada';
-    } else if (!primeraEntrada && ultimaSalida && !salidaAlmuerzo && !entradaAlmuerzo) {
+    } else if (!primeraEntrada && ultimaSalida) {
       subtipo = 'Solo salida';
-    } else if (primeraEntrada && !ultimaSalida && salidaAlmuerzo && entradaAlmuerzo) {
-      subtipo = 'Falta salida final';
-    } else if (!primeraEntrada && ultimaSalida && salidaAlmuerzo && entradaAlmuerzo) {
-      subtipo = 'Falta entrada inicial';
-    } else if (!primeraEntrada && !ultimaSalida && salidaAlmuerzo && entradaAlmuerzo) {
-      subtipo = 'Solo almuerzo';
-    } else if (primeraEntrada && ultimaSalida && salidaAlmuerzo && !entradaAlmuerzo) {
-      subtipo = 'Falta entrada almuerzo';
-    } else if (primeraEntrada && ultimaSalida && !salidaAlmuerzo && entradaAlmuerzo) {
-      subtipo = 'Falta salida almuerzo';
-    } else if (!primeraEntrada && !ultimaSalida && salidaAlmuerzo && !entradaAlmuerzo) {
-      subtipo = 'Solo salida almuerzo';
-    } else if (!primeraEntrada && !ultimaSalida && !salidaAlmuerzo && entradaAlmuerzo) {
-      subtipo = 'Solo entrada almuerzo';
-    } else if (otrosEventos.length > 0) {
-      subtipo = `Otros eventos (${otrosEventos.map(e => e.tipo).join(', ')})`;
-    } else {
-      subtipo = 'Sin registros';
+    } else if (primeraEntrada && ultimaSalida && (salidaAlmuerzo || entradaAlmuerzo)) {
+      subtipo = 'Almuerzo parcial';
     }
 
+    // Validar hora de salida
     let horaSalidaValida = ultimaSalida?.hora_simple || null;
-    if (primeraEntrada && ultimaSalida && 
-        primeraEntrada.hora_simple === ultimaSalida.hora_simple) {
+    if (primeraEntrada && ultimaSalida && primeraEntrada.hora_simple === ultimaSalida.hora_simple) {
       horaSalidaValida = null;
-      subtipo = 'ERROR - Misma hora entrada/salida';
+      subtipo = 'ERROR - Misma hora';
     }
 
-    if (primeraEntrada || ultimaSalida || salidaAlmuerzo || entradaAlmuerzo || otrosEventos.length > 0) {
-      const dispositivo = primeraEntrada?.dispositivo || 
-                         ultimaSalida?.dispositivo || 
-                         salidaAlmuerzo?.dispositivo || 
-                         entradaAlmuerzo?.dispositivo || 
-                         'Desconocido';
+    // Solo crear registro si hay algún evento significativo
+    if (primeraEntrada || ultimaSalida || salidaAlmuerzo || entradaAlmuerzo) {
+      const dispositivo = primeraEntrada?.dispositivo || ultimaSalida?.dispositivo || 'Desconocido';
+      const foto = primeraEntrada?.foto || '';
 
-      const foto = primeraEntrada?.foto || 
-                   ultimaSalida?.foto || 
-                   salidaAlmuerzo?.foto || 
-                   entradaAlmuerzo?.foto || 
-                   '';
-
-      // Obtener la campaña/departamento del usuario
+      // Obtener campaña
       const campaña = await obtenerCampañaPorDocumento(grupo.documento, client);
 
       registrosBD.push({
@@ -493,11 +523,11 @@ async function procesarParaBD(eventos, client) {
         campaña: campaña
       });
 
-      log.info(`📝 Registro: ${grupo.fecha} - ${grupo.documento} - ${subtipo}`);
+      log.info(`📝 Registrado: ${grupo.documento} - ${grupo.fecha} - ${subtipo}`);
     }
   }
 
-  log.info(`\n📊 TOTAL REGISTROS GENERADOS: ${registrosBD.length}`);
+  log.info(`✅ Total registros generados: ${registrosBD.length}`);
   return registrosBD;
 }
 
@@ -510,13 +540,13 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
   let client;
 
   try {
-    log.info('='.repeat(60));
+    log.info('\n' + '='.repeat(60));
     
     if (fechaInicio && fechaFin) {
-      log.info('💾 SINCRONIZACIÓN EVENTOS HISTÓRICOS → POSTGRESQL');
+      log.info('💾 SINCRONIZACIÓN HISTÓRICA → POSTGRESQL');
       log.info(`📅 Rango: ${fechaInicio} al ${fechaFin}`);
     } else {
-      log.info('💾 SINCRONIZACIÓN EVENTOS DE HOY → POSTGRESQL');
+      log.info('💾 SINCRONIZACIÓN DE HOY → POSTGRESQL');
       const hoy = new Date().toISOString().split('T')[0];
       fechaInicio = hoy;
       fechaFin = hoy;
@@ -528,14 +558,14 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
     let eventosHikvision;
     
     if (fechaInicio && fechaFin && fechaInicio !== fechaFin) {
-      // Usar la nueva función para rango de fechas (día por día)
       eventosHikvision = await obtenerEventosDeHikvisionPorRango(fechaInicio, fechaFin);
     } else {
-      // Usar la función original para un solo día
-      eventosHikvision = await obtenerEventosDeHikvision();
+      // Usar función mejorada para un solo día
+      eventosHikvision = await obtenerEventosDeHikvisionPorDia(fechaInicio);
     }
 
     if (eventosHikvision.length === 0) {
+      const tiempoTotal = ((Date.now() - startTime) / 1000).toFixed(2);
       const mensaje = fechaInicio === fechaFin 
         ? 'No hay eventos para hoy' 
         : `No hay eventos en el rango ${fechaInicio} - ${fechaFin}`;
@@ -545,7 +575,7 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
         registros_procesados: 0,
         nuevos_registros: 0,
         registros_actualizados: 0,
-        tiempo_segundos: ((Date.now() - startTime) / 1000).toFixed(2),
+        tiempo_segundos: parseFloat(tiempoTotal),
         mensaje: mensaje
       };
     }
@@ -556,7 +586,7 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
     await client.connect();
     log.success('Conectado a PostgreSQL');
 
-    // Verificar/crear tabla
+    // Crear tabla si no existe
     await client.query(`
       CREATE TABLE IF NOT EXISTS eventos_procesados (
         id SERIAL PRIMARY KEY,
@@ -572,7 +602,7 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
         dispositivo_ip VARCHAR(50),
         imagen TEXT,
         campaña VARCHAR(100),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(documento, fecha)
       )
     `);
@@ -582,12 +612,13 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
     const registrosBD = await procesarParaBD(eventosHikvision, client);
 
     if (registrosBD.length === 0) {
+      const tiempoTotal = ((Date.now() - startTime) / 1000).toFixed(2);
       return {
         eventos_obtenidos: eventosHikvision.length,
         registros_procesados: 0,
         nuevos_registros: 0,
         registros_actualizados: 0,
-        tiempo_segundos: ((Date.now() - startTime) / 1000).toFixed(2),
+        tiempo_segundos: parseFloat(tiempoTotal),
         mensaje: 'Eventos obtenidos pero no generaron registros válidos'
       };
     }
@@ -617,8 +648,7 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
               subtipo_evento = $7,
               dispositivo_ip = $8,
               imagen = $9,
-              campaña = $10,
-              created_at = CURRENT_TIMESTAMP
+              campaña = $10
             WHERE documento = $11 AND fecha = $12
           `, [
             registro.nombre,
@@ -635,9 +665,6 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
             registro.fecha
           ]);
           actualizados++;
-          if (actualizados % 10 === 0) {
-            log.info(`   🔄 Actualizados: ${actualizados}/${registrosBD.length}`);
-          }
         } else {
           await client.query(`
             INSERT INTO eventos_procesados (
@@ -660,9 +687,6 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
             registro.campaña
           ]);
           insertados++;
-          if (insertados % 10 === 0) {
-            log.info(`   ➕ Insertados: ${insertados}/${registrosBD.length}`);
-          }
         }
 
       } catch (error) {
@@ -682,8 +706,8 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
     log.info(`   • Nuevos registros: ${insertados}`);
     log.info(`   • Registros actualizados: ${actualizados}`);
     log.info(`   • Errores: ${errores}`);
-    log.info(`   • Tiempo total: ${tiempoTotal} segundos`);
-    log.info(`   • Rango: ${fechaInicio} a ${fechaFin}`);
+    log.info(`   • Tiempo total: ${tiempoTotal}s`);
+    log.info(`   • Fecha: ${fechaInicio === fechaFin ? fechaInicio : `${fechaInicio} a ${fechaFin}`}`);
 
     return {
       eventos_obtenidos: eventosHikvision.length,
@@ -693,7 +717,7 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
       errores: errores,
       tiempo_segundos: parseFloat(tiempoTotal),
       fecha_sincronizada: fechaInicio === fechaFin ? fechaInicio : `${fechaInicio} a ${fechaFin}`,
-      hora_sincronizacion_colombia: formatHoraColombia()
+      hora_sincronizacion: formatHoraColombia()
     };
 
   } catch (error) {
@@ -709,30 +733,34 @@ async function sincronizarEventos(fechaInicio = null, fechaFin = null) {
 }
 
 // ================================================
+// VARIABLES DE CONTROL PARA SINCRONIZACIÓN
+// ================================================
+
+let sincronizacionActiva = false;
+let ultimaEjecucion = null;
+let intervaloId = null;
+
+// ================================================
 // FUNCIONES DE CONTROL AUTOMÁTICO
 // ================================================
 
 async function ejecutarSincronizacionAutomatica() {
   try {
-    log.info('\n' + '-'.repeat(50));
-    log.info('🔄 EJECUTANDO SINCRONIZACIÓN AUTOMÁTICA');
+    log.info('\n' + '🔄 EJECUTANDO SINCRONIZACIÓN AUTOMÁTICA');
     log.info(`🕐 Hora Colombia: ${formatHoraColombia()}`);
-    log.info('-'.repeat(50));
 
     const resultado = await sincronizarEventos();
     
     ultimaEjecucion = new Date().toISOString();
 
     if (resultado.eventos_obtenidos > 0) {
-      log.success(`Sincronización completada: ${resultado.eventos_obtenidos} eventos`);
-      log.info(`📊 Guardados: ${resultado.registros_procesados} registros`);
-      log.info(`⏱️  Tiempo: ${resultado.tiempo_segundos}s`);
+      log.success(`✅ Sincronización completada: ${resultado.eventos_obtenidos} eventos`);
     } else {
-      log.info('No hay eventos nuevos para sincronizar');
+      log.info('📭 No hay eventos nuevos para sincronizar');
     }
 
   } catch (error) {
-    log.error('Error en sincronización automática:', error.message);
+    log.error('❌ Error en sincronización automática:', error.message);
   }
 }
 
@@ -742,29 +770,19 @@ function iniciarSincronizacionAutomatica() {
     return;
   }
 
-  log.info('\n' + '='.repeat(70));
-  log.info('⏰ INICIANDO SINCRONIZACIÓN AUTOMÁTICA (Cada 1 minuto)');
-  log.info('='.repeat(70));
-  log.info(`🕐 Hora Colombia: ${formatHoraColombia()}`);
-  log.info('='.repeat(70));
-
   sincronizacionActiva = true;
 
+  // Ejecutar inmediatamente
   ejecutarSincronizacionAutomatica();
 
-  intervaloId = setInterval(ejecutarSincronizacionAutomatica, 1 * 60 * 1000);
+  // Configurar intervalo de 2 minutos
+  intervaloId = setInterval(ejecutarSincronizacionAutomatica, 2 * 60 * 1000);
 
-  if (typeof process !== 'undefined') {
-    process.on('SIGINT', limpiarSincronizacion);
-    process.on('SIGTERM', limpiarSincronizacion);
-  }
+  log.info('⏰ Sincronización automática iniciada (cada 2 minutos)');
 }
 
 function detenerSincronizacionAutomatica() {
-  if (!sincronizacionActiva) {
-    log.info('Sincronización automática no está activa');
-    return;
-  }
+  if (!sincronizacionActiva) return;
 
   if (intervaloId) {
     clearInterval(intervaloId);
@@ -772,10 +790,6 @@ function detenerSincronizacionAutomatica() {
   }
   sincronizacionActiva = false;
   intervaloId = null;
-}
-
-function limpiarSincronizacion() {
-  detenerSincronizacionAutomatica();
 }
 
 // ================================================
@@ -789,10 +803,27 @@ export async function GET(request) {
     const fechaInicio = url.searchParams.get('fechaInicio');
     const fechaFin = url.searchParams.get('fechaFin');
     
-    // Nuevo caso para sincronización histórica
-    if (accion === 'historico' && fechaInicio && fechaFin) {
-      log.info(`🔍 Sincronización histórica solicitada: ${fechaInicio} al ${fechaFin}`);
+    // Sincronizar ayer específicamente
+    if (accion === 'ayer') {
+      log.info('\n📅 Sincronizando específicamente eventos de AYER');
       
+      const hoy = new Date();
+      const ayer = new Date(hoy);
+      ayer.setDate(hoy.getDate() - 1);
+      const fechaAyer = ayer.toISOString().split('T')[0];
+      
+      const resultado = await sincronizarEventos(fechaAyer, fechaAyer);
+      
+      return NextResponse.json({
+        success: true,
+        message: `Sincronización de AYER (${fechaAyer}) completada`,
+        hora_colombia: formatHoraColombia(),
+        ...resultado
+      });
+    }
+    
+    // Casos existentes...
+    if (accion === 'historico' && fechaInicio && fechaFin) {
       const resultado = await sincronizarEventos(fechaInicio, fechaFin);
       
       return NextResponse.json({
@@ -803,44 +834,12 @@ export async function GET(request) {
       });
     }
     
-    // Caso para sincronizar diciembre 1-13 específicamente
-    if (accion === 'diciembre') {
-      const inicioDiciembre = '2024-12-01';
-      const finDiciembre = '2024-12-13';
-      
-      log.info(`🎄 SINCRONIZACIÓN DICIEMBRE 1-13 SOLICITADA`);
-      log.info(`📅 Fechas: ${inicioDiciembre} al ${finDiciembre}`);
-      
-      const resultado = await sincronizarEventos(inicioDiciembre, finDiciembre);
-      
-      return NextResponse.json({
-        success: true,
-        message: `Sincronización DICIEMBRE (1-13) completada`,
-        hora_colombia: formatHoraColombia(),
-        ...resultado
-      });
-    }
-    
-    // Caso para sincronizar día por día específico
-    if (accion === 'dia' && fechaInicio) {
-      log.info(`📅 Sincronización para día específico: ${fechaInicio}`);
-      
-      const resultado = await sincronizarEventos(fechaInicio, fechaInicio);
-      
-      return NextResponse.json({
-        success: true,
-        message: `Sincronización para ${fechaInicio} completada`,
-        hora_colombia: formatHoraColombia(),
-        ...resultado
-      });
-    }
-    
     if (accion === 'estado') {
       let proximaEjecucion = null;
       
       if (ultimaEjecucion) {
         const ultima = new Date(ultimaEjecucion);
-        proximaEjecucion = new Date(ultima.getTime() + 1 * 60 * 1000);
+        proximaEjecucion = new Date(ultima.getTime() + 2 * 60 * 1000);
       }
       
       return NextResponse.json({
@@ -848,57 +847,33 @@ export async function GET(request) {
         sincronizacion_automatica: {
           activa: sincronizacionActiva,
           ultima_ejecucion: ultimaEjecucion,
-          ultima_ejecucion_colombia: convertirUTCaColombia(ultimaEjecucion),
-          proxima_ejecucion: proximaEjecucion ? proximaEjecucion.toISOString() : null,
-          proxima_ejecucion_colombia: proximaEjecucion ? convertirUTCaColombia(proximaEjecucion.toISOString()) : null,
-          intervalo_minutos: 1
+          proxima_ejecucion: proximaEjecucion?.toISOString(),
+          intervalo_minutos: 2
         },
-        timestamps: {
-          servidor_utc: new Date().toISOString(),
-          servidor_local: formatHoraColombia(),
-          colombia: convertirUTCaColombia(new Date().toISOString()),
-          diferencia_horas: 'Colombia = UTC - 5 horas'
-        }
+        hora_colombia: formatHoraColombia()
       });
     }
     
     if (accion === 'iniciar') {
-      if (!sincronizacionActiva) {
-        iniciarSincronizacionAutomatica();
-        return NextResponse.json({
-          success: true,
-          message: 'Sincronización automática iniciada',
-          intervalo: '1 minuto',
-          hora_colombia: formatHoraColombia()
-        });
-      } else {
-        return NextResponse.json({
-          success: true,
-          message: 'La sincronización automática ya está activa',
-          hora_colombia: formatHoraColombia()
-        });
-      }
+      iniciarSincronizacionAutomatica();
+      return NextResponse.json({
+        success: true,
+        message: 'Sincronización automática iniciada',
+        intervalo: '2 minutos',
+        hora_colombia: formatHoraColombia()
+      });
     }
     
     if (accion === 'detener') {
-      if (sincronizacionActiva) {
-        detenerSincronizacionAutomatica();
-        return NextResponse.json({
-          success: true,
-          message: 'Sincronización automática detenida',
-          hora_colombia: formatHoraColombia()
-        });
-      } else {
-        return NextResponse.json({
-          success: true,
-          message: 'La sincronización automática no está activa',
-          hora_colombia: formatHoraColombia()
-        });
-      }
+      detenerSincronizacionAutomatica();
+      return NextResponse.json({
+        success: true,
+        message: 'Sincronización automática detenida',
+        hora_colombia: formatHoraColombia()
+      });
     }
     
     if (accion === 'forzar') {
-      log.info('🔧 Ejecución forzada solicitada');
       const resultado = await sincronizarEventos();
       
       return NextResponse.json({
@@ -909,21 +884,14 @@ export async function GET(request) {
       });
     }
 
-    // Ejecutar sincronización normal (hoy por defecto)
+    // Sincronización normal (hoy por defecto)
     const resultado = await sincronizarEventos();
 
     return NextResponse.json({
       success: true,
-      message: 'Sincronización de eventos de hoy completada',
-      timestamp: new Date().toISOString(),
+      message: 'Sincronización completada',
       hora_colombia: formatHoraColombia(),
       ...resultado
-    }, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache, no-store'
-      }
     });
 
   } catch (error) {
@@ -932,45 +900,30 @@ export async function GET(request) {
     return NextResponse.json({
       success: false,
       error: error.message,
-      timestamp: new Date().toISOString(),
       hora_colombia: formatHoraColombia()
     }, {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      status: 500
     });
   }
 }
-
-// ================================================
-// ENDPOINT POST
-// ================================================
 
 export async function POST(request) {
   return await GET(request);
 }
 
 // ================================================
-// INICIAR AUTOMÁTICAMENTE AL CARGAR EL MÓDULO
+// INICIAR AUTOMÁTICAMENTE
 // ================================================
 
 function iniciarAutomaticamente() {
-  if (typeof window !== 'undefined') {
-    return;
-  }
-
-  if (sincronizacionActiva) {
-    log.info('Sincronización automática ya está activa');
-    return;
-  }
+  if (typeof window !== 'undefined') return;
+  if (sincronizacionActiva) return;
 
   log.info('\n🔍 INICIANDO SINCRONIZACIÓN AUTOMÁTICA...');
-  log.info(`🕐 Hora Colombia: ${formatHoraColombia()}`);
-  log.info(`🌍 Entorno: ${process.env.NODE_ENV || 'development'}`);
-
+  
   setTimeout(() => {
-    log.info('🚀 SINCRONIZACIÓN AUTOMÁTICA INICIADA');
     iniciarSincronizacionAutomatica();
-  }, 1000);
+  }, 3000);
 }
 
 log.info('📦 Módulo de sincronización cargado');
