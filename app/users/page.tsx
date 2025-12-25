@@ -18,29 +18,29 @@ export default function UsuariosPage() {
   const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
   const [usuarioAEliminar, setUsuarioAEliminar] = useState<Usuario | null>(null);
   const [departamentoFiltro, setDepartamentoFiltro] = useState<string | null>(null);
-  
+
   // Obtener información del usuario actual
-  const { 
-    userRole, 
+  const {
+    userRole,
     userCampaign,
     userCampaignRaw,
     userDepartments,
     esTeamLeaderVentas,
-    userName, 
+    userName,
     shouldHide,
     isLoading: loadingUser,
     refreshSession
   } = useHideFrom();
-  
+
   // Determinar si es Team Leader
   const isTeamLeader = userRole === 'Team Leader';
-  
+
   // Determinar si es TI o Administrador (acceso global)
   const isGlobalAccess = userRole === 'TI' || userRole === 'Administrador';
-  
+
   // DEBUG: Ver qué datos tenemos
   useEffect(() => {
-    
+
   }, [userRole, userCampaign, userCampaignRaw, userDepartments, esTeamLeaderVentas, userName, loadingUser, isTeamLeader, isGlobalAccess, departamentoFiltro]);
 
   // Cargar usuarios (solo una vez al inicio)
@@ -49,8 +49,8 @@ export default function UsuariosPage() {
       setCargando(true);
       setError(null);
 
-      
-      
+
+
       // SIEMPRE cargar todos los usuarios sin filtro inicial
       const url = '/api/users/bd?limit=1000';
 
@@ -60,12 +60,12 @@ export default function UsuariosPage() {
           'Cache-Control': 'no-cache'
         }
       });
-      
+
       if (!response.ok) throw new Error(`Error ${response.status}`);
-      
+
       const data = await response.json();
-      
-      
+
+
       if (data.success) {
         const usuariosFormateados = (data.data || []).map((user: any) => ({
           ...user,
@@ -75,9 +75,9 @@ export default function UsuariosPage() {
           departamento: user.departamento || 'No asignado',
           campana: user.campana || 'No asignada'
         }));
-        
+
         setUsuarios(usuariosFormateados);
-        
+
         // Establecer filtro inicial basado en la respuesta (para Team Leaders)
         if (isTeamLeader && data.metadata?.forcedDepartment) {
           // Team Leader: usar el departamento forzado por el backend
@@ -104,28 +104,28 @@ export default function UsuariosPage() {
     if (!departamentoFiltro) {
       // Si es Team Leader sin filtro explícito, aplicar filtro por sus departamentos
       if (isTeamLeader && userDepartments && userDepartments.length > 0) {
-        return usuarios.filter(usuario => 
+        return usuarios.filter(usuario =>
           userDepartments.includes(usuario.departamento || '')
         );
       }
       return usuarios;
     }
-    
+
     // Aplicar filtro específico
     return usuarios.filter(usuario => usuario.departamento === departamentoFiltro);
   }, [usuarios, departamentoFiltro, isTeamLeader, userDepartments]);
 
   // Aplicar filtro por departamento - SIN RECARGAR PÁGINA
   const aplicarFiltroDepartamento = (departamento: string | null) => {
-    
-    
+
+
     // Solo TI/Admin pueden cambiar filtros manualmente
     if (isTeamLeader && departamento !== null) {
       console.warn('⚠️ Team Leader intentó cambiar filtro');
       alert('Los Team Leaders solo pueden ver usuarios de su(s) campaña(s) asignada(s)');
       return;
     }
-    
+
     // Si se hace clic en el filtro activo, limpiarlo
     if (departamento === departamentoFiltro) {
       setDepartamentoFiltro(null);
@@ -159,9 +159,10 @@ export default function UsuariosPage() {
     }
   };
 
-  // Función para crear usuario - ACTUALIZADA PARA RECARGAR
-  const crearUsuario = async (nuevoUsuario: Usuario) => {
+  // Función para crear usuario - CORREGIDA
+  const crearUsuario = async (usuarios: Usuario[]) => {
     try {
+      // Recargar la página después de crear
       setTimeout(() => {
         window.location.reload();
       }, 1500);
@@ -173,10 +174,10 @@ export default function UsuariosPage() {
   // Validación para Team Leaders
   const puedeGestionarUsuario = (usuario: Usuario) => {
     if (!isTeamLeader) return true;
-    
+
     const usuarioDepartamento = usuario.departamento || '';
     const resultado = userDepartments?.includes(usuarioDepartamento) || false;
-    
+
     return resultado;
   };
 
@@ -186,7 +187,7 @@ export default function UsuariosPage() {
     if (isTeamLeader && userDepartments && userDepartments.length > 0) {
       return userDepartments;
     }
-    
+
     // Para TI/Admin, mostrar todos los departamentos disponibles
     const departamentos = new Set<string>();
     usuarios.forEach(usuario => {
@@ -237,7 +238,7 @@ export default function UsuariosPage() {
               <div className="flex-1">
                 <div className="flex flex-wrap items-center gap-3 mb-1">
                   <h1 className="text-lg font-bold text-white">Gestión de Usuarios</h1>
-                  
+
                   <div className="flex items-center gap-2 text-sm">
                     <span className="px-2 py-1 bg-slate-800/70 text-slate-200 rounded text-xs">
                       {userRole || 'Usuario'}
@@ -247,7 +248,7 @@ export default function UsuariosPage() {
                         {userName}
                       </span>
                     )}
-                    
+
                     {isTeamLeader && userDepartments && userDepartments.length > 0 && (
                       <div className="flex items-center gap-2 ml-2">
                         <span className="text-xs text-slate-300">Campañas:</span>
@@ -264,7 +265,7 @@ export default function UsuariosPage() {
 
                   {/* Botón flotante de crear usuario - OCULTAR para Team Leader */}
                   {!shouldHide(['Team Leader']) && (
-                    <UsuarioCreateModal 
+                    <UsuarioCreateModal
                       onCreate={crearUsuario}
                       defaultDepartamento={isTeamLeader ? (userDepartments?.[0] || undefined) : undefined}
                     />
@@ -276,7 +277,7 @@ export default function UsuariosPage() {
                     <span className="w-2 h-2 bg-emerald-300 rounded-full mr-1.5"></span>
                     {usuariosFiltrados.length} {isTeamLeader ? 'en tus campañas' : (departamentoFiltro ? `en ${departamentoFiltro}` : 'Totales')}
                   </span>
-                  
+
                   {esTeamLeaderVentas && (
                     <span className="inline-flex items-center bg-yellow-800/70 text-yellow-100 px-2.5 py-1 rounded-lg">
                       <svg className="w-3 h-3 mr-1.5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
@@ -332,7 +333,7 @@ export default function UsuariosPage() {
 
                       const colorClase = coloresDepartamentos[depto] || "from-gray-600 to-gray-500 border-gray-500/50";
                       const isActive = departamentoFiltro === depto;
-                      
+
                       // Contar cuántos usuarios hay en este departamento
                       const count = usuarios.filter(u => u.departamento === depto).length;
 
@@ -359,7 +360,7 @@ export default function UsuariosPage() {
                 </div>
               </div>
             )}
-            
+
             {/* Mensaje para Team Leaders */}
             {isTeamLeader && (
               <div className="mt-3 pt-3 border-t border-slate-500/50">

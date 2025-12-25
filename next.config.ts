@@ -6,22 +6,20 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: '172.31.0.165',
+        hostname: '172.31.0.130',
         port: '',
         pathname: '/**',
       },
       {
         protocol: 'https',
-        hostname: '172.31.0.164',
+        hostname: '172.31.0.131',
         port: '',
         pathname: '/**',
       },
     ],
     unoptimized: true,
   },
-  experimental: {
-    missingSuspenseWithCSRBailout: false,
-  },
+
   // Agregar para evitar problemas CORS
   async headers() {
     return [

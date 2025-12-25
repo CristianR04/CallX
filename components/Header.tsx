@@ -7,9 +7,12 @@ import { useHideFrom } from "@/lib/hooks/useRole";
 interface HeaderEventosProps {
   estadisticas: {
     usuariosPorDepartamento: Record<string, number>;
+    ejecutivos: string[]; // Nuevo: lista de ejecutivos disponibles
   };
   departamentoFiltro: string | null;
+  ejecutivoFiltro: string | null; // Nuevo
   onFiltroChange: (departamento: string | null) => void;
+  onEjecutivoChange: (ejecutivo: string | null) => void; // Nuevo
   eventosCount: number;
   onRefresh: () => void;
   isRefreshing?: boolean;
@@ -20,10 +23,26 @@ interface HeaderEventosProps {
   fechaFin: string;
 }
 
+// Función para formatear fecha a YYYY-MM-DD (local)
+const formatDateToLocal = (date: Date): string => {
+  const año = date.getFullYear();
+  const mes = String(date.getMonth() + 1).padStart(2, '0');
+  const dia = String(date.getDate()).padStart(2, '0');
+  return `${año}-${mes}-${dia}`;
+};
+
+// Función para convertir string YYYY-MM-DD a Date (local)
+const stringToLocalDate = (dateString: string): Date => {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
 export function HeaderEventos({
   estadisticas,
   departamentoFiltro,
+  ejecutivoFiltro,
   onFiltroChange,
+  onEjecutivoChange,
   eventosCount,
   onRefresh,
   isRefreshing = false,
@@ -42,41 +61,98 @@ export function HeaderEventos({
 
   // Estados para el modal de sincronización con DatePicker
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [startDate, setStartDate] = useState<Date | null>(new Date());
-  const [endDate, setEndDate] = useState<Date | null>(new Date());
-  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([new Date(), new Date()]);
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null]);
 
-  // Sincronizar con las props cuando cambien
+  // Estados para el filtro de ejecutivos con búsqueda
+  const [searchEjecutivo, setSearchEjecutivo] = useState('');
+  const [showEjecutivoDropdown, setShowEjecutivoDropdown] = useState(false);
+  const [filteredEjecutivos, setFilteredEjecutivos] = useState<string[]>([]);
+
+  // Sincronizar fechas locales con props
   useEffect(() => {
-    setLocalFechaInicio(fechaInicio);
-    setLocalFechaFin(fechaFin);
+    console.log('📅 Header: Sincronizando fechas', { 
+      props: { fechaInicio, fechaFin }, 
+      estado: { localFechaInicio, localFechaFin } 
+    });
+    
+    // Siempre sincronizar con props
+    if (fechaInicio !== localFechaInicio) {
+      setLocalFechaInicio(fechaInicio);
+    }
+    if (fechaFin !== localFechaFin) {
+      setLocalFechaFin(fechaFin);
+    }
   }, [fechaInicio, fechaFin]);
 
-  // Función para formatear fecha a YYYY-MM-DD
-  const formatDate = (date: Date): string => {
-    return date.toISOString().split('T')[0];
-  };
+  // Filtrar ejecutivos basado en búsqueda
+  useEffect(() => {
+    if (estadisticas.ejecutivos) {
+      if (!searchEjecutivo.trim()) {
+        setFilteredEjecutivos(estadisticas.ejecutivos);
+      } else {
+        const searchLower = searchEjecutivo.toLowerCase();
+        const filtered = estadisticas.ejecutivos.filter(ejecutivo =>
+          ejecutivo.toLowerCase().includes(searchLower)
+        );
+        setFilteredEjecutivos(filtered);
+      }
+    }
+  }, [searchEjecutivo, estadisticas.ejecutivos]);
+
+  // Cerrar dropdown al hacer clic fuera
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.ejecutivo-selector-container')) {
+        setShowEjecutivoDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const handleFechaInicioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const nuevaInicio = e.target.value;
+    console.log('📅 Header: Cambio fecha inicio', { 
+      anterior: localFechaInicio, 
+      nueva: nuevaInicio,
+      periodo: selectedPeriodo 
+    });
+    
     setLocalFechaInicio(nuevaInicio);
+    
+    // Cambiar a período personalizado automáticamente
+    onPeriodoChange('personalizado');
     onFechasChange(nuevaInicio, fechaFin);
   };
 
   const handleFechaFinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const nuevaFin = e.target.value;
+    console.log('📅 Header: Cambio fecha fin', { 
+      anterior: localFechaFin, 
+      nueva: nuevaFin,
+      periodo: selectedPeriodo 
+    });
+    
     setLocalFechaFin(nuevaFin);
-    if (fechaInicio && nuevaFin) {
-      onPeriodoChange('personalizado');
-      onFechasChange(fechaInicio, nuevaFin);
-    }
+    // Cambiar a período personalizado automáticamente
+    onPeriodoChange('personalizado');
+    onFechasChange(fechaInicio, nuevaFin);
   };
 
-  // Función para abrir modal de sincronización
+  // En el modal de sincronización, corrige la inicialización:
   const handleOpenSyncModal = () => {
-    // Inicializar con rango predeterminado: Diciembre 1 hasta hoy
-    const inicio = new Date();
-    const fin = new Date();
+    // Usar las fechas actuales del rango en lugar de "hoy"
+    const inicio = fechaInicio ? stringToLocalDate(fechaInicio) : new Date();
+    const fin = fechaFin ? stringToLocalDate(fechaFin) : new Date();
+
+    console.log('📅 Modal: Fechas iniciales', { inicio, fin, fechaInicio, fechaFin });
+
     setStartDate(inicio);
     setEndDate(fin);
     setDateRange([inicio, fin]);
@@ -102,16 +178,21 @@ export function HeaderEventos({
       return;
     }
 
-    const fechaInicioStr = formatDate(startDate);
-    const fechaFinStr = formatDate(endDate);
+    const fechaInicioStr = formatDateToLocal(startDate);
+    const fechaFinStr = formatDateToLocal(endDate);
+    
+    console.log('📅 Sincronizando rango:', { 
+      fechaInicioStr, 
+      fechaFinStr,
+      startDate,
+      endDate 
+    });
 
     setIsSincronizando(true);
     setSyncResult(null);
     handleCloseSyncModal();
 
     try {
-      // CORREGIR ESTA URL:
-      // Cambiar de /api/sincronizar a /api/eventos/actualizar-eventos
       const url = `/api/eventos/actualizar-eventos?accion=historico&fechaInicio=${fechaInicioStr}&fechaFin=${fechaFinStr}`;
 
       console.log('📡 Enviando solicitud a:', url);
@@ -146,6 +227,19 @@ export function HeaderEventos({
     } finally {
       setIsSincronizando(false);
     }
+  };
+
+  // Función para seleccionar ejecutivo
+  const handleSelectEjecutivo = (ejecutivo: string) => {
+    onEjecutivoChange(ejecutivo);
+    setSearchEjecutivo('');
+    setShowEjecutivoDropdown(false);
+  };
+
+  // Función para limpiar filtro de ejecutivo
+  const handleClearEjecutivo = () => {
+    onEjecutivoChange(null);
+    setSearchEjecutivo('');
   };
 
   useEffect(() => {
@@ -223,8 +317,6 @@ export function HeaderEventos({
                     }}
                   />
                 </div>
-
-
               </div>
               <div className="text-sm text-slate-400">
                 {startDate && endDate ? (
@@ -232,7 +324,7 @@ export function HeaderEventos({
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    {formatDate(startDate)} al {formatDate(endDate)}
+                    {formatDateToLocal(startDate)} al {formatDateToLocal(endDate)}
                   </span>
                 ) : (
                   <span>Selecciona un rango de fechas</span>
@@ -615,9 +707,10 @@ export function HeaderEventos({
                 <div className="text-sm text-purple-200 font-medium">
                   Eventos {departamentoFiltro ? 'Filtrados' : 'Encontrados'}
                 </div>
-                {departamentoFiltro && (
-                  <div className="mt-2 text-xs text-purple-300">
-                    Filtro: {departamentoFiltro}
+                {(departamentoFiltro || ejecutivoFiltro) && (
+                  <div className="mt-2 text-xs text-purple-300 space-y-1">
+                    {departamentoFiltro && <div>Depto: {departamentoFiltro}</div>}
+                    {ejecutivoFiltro && <div>Ejecutivo: {ejecutivoFiltro}</div>}
                   </div>
                 )}
               </div>
@@ -691,6 +784,122 @@ export function HeaderEventos({
                       );
                     })}
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* CUARTA FILA: Filtros por Ejecutivo */}
+          <div className="mt-4 pt-4 border-t border-slate-500/50">
+            <div className="flex items-start md:items-center gap-3 mb-3 flex-col md:flex-row">
+              {/* Título y contador para Ejecutivos */}
+              <div className="flex items-center text-sm font-medium text-slate-200">
+                <svg className="w-4 h-4 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                <span className="whitespace-nowrap">Filtro por Ejecutivo</span>
+                <span className="ml-2 px-2 py-0.5 bg-slate-800 text-slate-300 text-xs rounded-full border border-slate-600">
+                  {estadisticas.ejecutivos?.length || 0}
+                </span>
+              </div>
+
+              {/* Botón Todos - Ejecutivos */}
+              <div className="flex-shrink-0">
+                <button
+                  onClick={handleClearEjecutivo}
+                  disabled={isSincronizando}
+                  className={`transition-all duration-200 px-3 py-1.5 rounded-lg border flex-shrink-0 shadow-sm text-xs font-medium ${!ejecutivoFiltro
+                    ? 'bg-gradient-to-br from-blue-700 to-blue-600 border-blue-500/50 text-white'
+                    : 'bg-gradient-to-br from-slate-700/80 to-slate-800/80 hover:from-slate-600/80 hover:to-slate-700/80 border-slate-600/40 hover:border-slate-500/50 text-slate-200'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+                    </svg>
+                    Todos Ejecutivos
+                  </div>
+                </button>
+              </div>
+
+              {/* Selector de Ejecutivos con búsqueda */}
+              <div className="relative flex-1 min-w-[250px] ejecutivo-selector-container">
+                <div className="relative">
+                  <div className="flex items-center">
+                    <svg className="absolute left-3 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <input
+                      type="text"
+                      value={searchEjecutivo}
+                      onChange={(e) => {
+                        setSearchEjecutivo(e.target.value);
+                        setShowEjecutivoDropdown(true);
+                      }}
+                      onFocus={() => setShowEjecutivoDropdown(true)}
+                      placeholder="Buscar ejecutivo..."
+                      disabled={isSincronizando}
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <button
+                      onClick={() => setShowEjecutivoDropdown(!showEjecutivoDropdown)}
+                      className="absolute right-3 text-slate-400 hover:text-white"
+                      disabled={isSincronizando}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Dropdown de ejecutivos */}
+                  {showEjecutivoDropdown && estadisticas.ejecutivos && (
+                    <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                      <div className="p-2">
+                        {filteredEjecutivos.length > 0 ? (
+                          filteredEjecutivos.map((ejecutivo) => (
+                            <button
+                              key={ejecutivo}
+                              onClick={() => handleSelectEjecutivo(ejecutivo)}
+                              className={`w-full text-left px-3 py-2 text-sm rounded hover:bg-slate-700 transition-colors ${ejecutivo === ejecutivoFiltro
+                                ? 'bg-blue-900/50 text-blue-200'
+                                : 'text-slate-200'
+                                }`}
+                            >
+                              {ejecutivo}
+                            </button>
+                          ))
+                        ) : (
+                          <div className="px-3 py-2 text-sm text-slate-400">
+                            No se encontraron ejecutivos
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Mostrar ejecutivo seleccionado */}
+                {ejecutivoFiltro && (
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-300">Ejecutivo seleccionado:</span>
+                      <span className="px-2 py-1 bg-gradient-to-r from-blue-900/50 to-blue-800/50 text-blue-200 text-xs rounded-lg border border-blue-700/50 font-medium">
+                        {ejecutivoFiltro}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleClearEjecutivo}
+                      className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1"
+                      title="Quitar filtro"
+                      disabled={isSincronizando}
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      Limpiar
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

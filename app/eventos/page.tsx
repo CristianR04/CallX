@@ -6,8 +6,10 @@ import { HeaderEventos } from '@/components/Header';
 import Navbar from "@/components/navbar";
 import IdleSessionProtector from '@/components/IdleSessionProtector';
 import { descargarExcel } from '@/utils/excelGenerator';
+import { getLocalDateString, formatDateForInput, parseDateFromString } from '@/utils/dateUtils';
 
 export interface Evento {
+  id?: number;
   empleadoId: string;
   nombre: string;
   fecha: string;
@@ -31,6 +33,11 @@ export interface Evento {
   foto?: string;
 }
 
+interface Estadisticas {
+  usuariosPorDepartamento: Record<string, number>;
+  ejecutivos: string[];
+}
+
 export default function EventosPage() {
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [eventosFiltrados, setEventosFiltrados] = useState<Evento[]>([]);
@@ -39,108 +46,172 @@ export default function EventosPage() {
   const [fechaInicio, setFechaInicio] = useState<string>('');
   const [fechaFin, setFechaFin] = useState<string>('');
   const [departamentoFiltro, setDepartamentoFiltro] = useState<string | null>(null);
-  const [estadisticasDepartamentos, setEstadisticasDepartamentos] = useState({
-    usuariosPorDepartamento: {} as Record<string, number>
+  const [ejecutivoFiltro, setEjecutivoFiltro] = useState<string | null>(null);
+  const [estadisticas, setEstadisticas] = useState<Estadisticas>({
+    usuariosPorDepartamento: {},
+    ejecutivos: []
   });
   const [isDescargandoExcel, setIsDescargandoExcel] = useState(false);
 
   // Inicializar desde localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const savedFilter = localStorage.getItem('departamentoFiltro');
-      if (savedFilter) {
-        setDepartamentoFiltro(savedFilter);
+      const savedDeptoFilter = localStorage.getItem('departamentoFiltro');
+      const savedEjecutivoFilter = localStorage.getItem('ejecutivoFiltro');
+
+      if (savedDeptoFilter) {
+        setDepartamentoFiltro(savedDeptoFilter);
       }
+
+      if (savedEjecutivoFilter) {
+        setEjecutivoFiltro(savedEjecutivoFilter);
+      }
+
+      // USAR FECHA LOCAL, NO UTC
+      const fechaHoy = getLocalDateString();
+      console.log('📅 Fecha hoy (LOCAL):', fechaHoy, 'Hora actual:', new Date().toLocaleString());
       
-      const hoy = new Date().toISOString().split('T')[0];
-      setFechaInicio(hoy);
-      setFechaFin(hoy);
+      setFechaInicio(fechaHoy);
+      setFechaFin(fechaHoy);
     }
   }, []);
 
-  // Cargar eventos desde el API
+  // Función normalizadora para comparar strings
+  const normalizarString = (str: string): string => {
+    if (!str) return '';
+    return str.trim().toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ');
+  };
+
+  // Aplicar filtros por departamento/campaña y ejecutivo
+  const aplicarFiltros = useCallback((
+    eventosLista: Evento[],
+    deptoFiltro: string | null,
+    ejecFiltro: string | null
+  ) => {
+    let filtrados = eventosLista;
+
+    // 1. Aplicar filtro por departamento
+    if (deptoFiltro && deptoFiltro !== 'Todos' && deptoFiltro !== 'todos') {
+      const filtroNormalizado = normalizarString(deptoFiltro);
+
+      filtrados = filtrados.filter(evento => {
+        const campañaEvento = evento.campaña || 'Sin grupo';
+        const campañaNormalizada = normalizarString(campañaEvento);
+        return campañaNormalizada.includes(filtroNormalizado);
+      });
+
+      console.log(`🔍 Filtrado por departamento "${deptoFiltro}": ${filtrados.length} eventos`);
+    }
+
+    // 2. Aplicar filtro por ejecutivo
+    if (ejecFiltro && ejecFiltro.trim() !== '') {
+      const filtroNormalizado = normalizarString(ejecFiltro);
+
+      filtrados = filtrados.filter(evento => {
+        const nombreEjecutivo = evento.nombre || '';
+        const nombreNormalizado = normalizarString(nombreEjecutivo);
+        return nombreNormalizado.includes(filtroNormalizado);
+      });
+
+      console.log(`👤 Filtrado por ejecutivo "${ejecFiltro}": ${filtrados.length} eventos`);
+    }
+
+    setEventosFiltrados(filtrados);
+  }, []);
+
+  // Función principal para cargar eventos
   const cargarEventos = useCallback(async (
     periodo: 'hoy' | '7dias' | '30dias' | 'personalizado',
     inicio?: string,
-    fin?: string
+    fin?: string,
+    deptoFiltroParam?: string | null,
+    ejecFiltroParam?: string | null
   ) => {
     setIsLoading(true);
     try {
       let url = `/api/eventos/bd?rango=${periodo}`;
+
+      const deptoFiltro = deptoFiltroParam !== undefined ? deptoFiltroParam : departamentoFiltro;
+      const ejecFiltro = ejecFiltroParam !== undefined ? ejecFiltroParam : ejecutivoFiltro;
+
+      console.log('🔄 Iniciando carga de eventos:', {
+        periodo,
+        inicio,
+        fin,
+        deptoFiltro,
+        ejecFiltro,
+        fechaActualLocal: getLocalDateString(),
+        fechaActualUTC: new Date().toISOString().split('T')[0]
+      });
+
       if (periodo === 'personalizado' && inicio && fin) {
         url += `&fechaInicio=${inicio}&fechaFin=${fin}`;
       }
+
+      if (deptoFiltro) {
+        url += `&departamento=${encodeURIComponent(deptoFiltro)}`;
+      }
+
+      if (ejecFiltro) {
+        url += `&ejecutivo=${encodeURIComponent(ejecFiltro)}`;
+      }
+
+      console.log('🌐 URL final:', url);
 
       const response = await fetch(url);
       const data = await response.json();
 
       if (data.success && data.eventos) {
-        
-        // Verificar estructura de datos
-        if (data.eventos.length > 0) {          
-          const campañasUnicas = [...new Set(data.eventos.map((e: Evento) => e.campaña))];
-        }
+        console.log(`✅ ${data.eventos.length} eventos cargados exitosamente`);
 
         setEventos(data.eventos);
-        
-        // Extraer estadísticas para filtros
+
         if (data.estadisticas?.porCampaña) {
           const usuariosPorDepartamento: Record<string, number> = {};
           Object.entries(data.estadisticas.porCampaña).forEach(([campaña, stats]: [string, any]) => {
             usuariosPorDepartamento[campaña] = stats.total || 0;
           });
-          setEstadisticasDepartamentos({ usuariosPorDepartamento });
+          setEstadisticas({
+            usuariosPorDepartamento,
+            ejecutivos: data.estadisticas.ejecutivos || []
+          });
+        } else {
+          setEstadisticas({
+            usuariosPorDepartamento: {},
+            ejecutivos: data.estadisticas?.ejecutivos || []
+          });
         }
 
-        // Aplicar filtro actual a los nuevos datos
-        aplicarFiltro(data.eventos, departamentoFiltro);
+        aplicarFiltros(data.eventos, deptoFiltro, ejecFiltro);
       } else {
-        console.error('❌ API no devolvió éxito');
+        console.error('❌ API no devolvió éxito. Datos:', data);
         setEventos([]);
         setEventosFiltrados([]);
+        setEstadisticas({
+          usuariosPorDepartamento: {},
+          ejecutivos: []
+        });
       }
-    } catch (error) {
-      console.error('❌ Error cargando eventos:', error);
+    } catch (error: any) {
+      console.error('❌ Error completo cargando eventos:', error);
       setEventos([]);
       setEventosFiltrados([]);
+      setEstadisticas({
+        usuariosPorDepartamento: {},
+        ejecutivos: []
+      });
     } finally {
       setIsLoading(false);
     }
-  }, [departamentoFiltro]);
+  }, [departamentoFiltro, ejecutivoFiltro, aplicarFiltros]);
 
-  // Función normalizadora para comparar strings (elimina espacios y convierte a minúsculas)
-  const normalizarString = (str: string): string => {
-    return str.trim().toLowerCase().replace(/\s+/g, ' ');
-  };
+  // Handler para cambiar filtro de departamento
+  const handleFiltroDepartamento = useCallback((nuevoFiltro: string | null) => {
+    console.log(`🔄 Cambiando filtro departamento: ${nuevoFiltro}`);
 
-  // Aplicar filtro por departamento/campaña
-  const aplicarFiltro = useCallback((eventosLista: Evento[], filtro: string | null) => {
-    if (!filtro || filtro === 'Todos' || filtro === 'todos') {
-      
-      setEventosFiltrados(eventosLista);
-      return;
-    }
-    
-    const filtroNormalizado = normalizarString(filtro);
-    
-    const filtrados = eventosLista.filter(evento => {
-      const campañaEvento = evento.campaña || 'Sin grupo';
-      const campañaNormalizada = normalizarString(campañaEvento);
-      
-      const coincide = campañaNormalizada === filtroNormalizado;
-      
-      if (coincide) {
-        
-      }
-      
-      return coincide;
-    });
-    
-    setEventosFiltrados(filtrados);
-  }, []);
-
-  // Handler para cambiar filtro
-  const handleFiltroDepartamento = useCallback((nuevoFiltro: string | null) => {    
     if (nuevoFiltro && nuevoFiltro !== 'Todos') {
       localStorage.setItem('departamentoFiltro', nuevoFiltro);
     } else {
@@ -149,10 +220,32 @@ export default function EventosPage() {
     }
 
     setDepartamentoFiltro(nuevoFiltro);
-    
-    // Aplicar filtro a los eventos actuales
-    aplicarFiltro(eventos, nuevoFiltro);
-  }, [eventos, departamentoFiltro, aplicarFiltro]);
+
+    if (selectedPeriodo === 'personalizado' && fechaInicio && fechaFin) {
+      cargarEventos('personalizado', fechaInicio, fechaFin, nuevoFiltro, ejecutivoFiltro);
+    } else {
+      cargarEventos(selectedPeriodo, undefined, undefined, nuevoFiltro, ejecutivoFiltro);
+    }
+  }, [selectedPeriodo, fechaInicio, fechaFin, ejecutivoFiltro, cargarEventos]);
+
+  // Handler para cambiar filtro de ejecutivo
+  const handleFiltroEjecutivo = useCallback((nuevoFiltro: string | null) => {
+    console.log(`🔄 Cambiando filtro ejecutivo: ${nuevoFiltro}`);
+
+    if (nuevoFiltro) {
+      localStorage.setItem('ejecutivoFiltro', nuevoFiltro);
+    } else {
+      localStorage.removeItem('ejecutivoFiltro');
+    }
+
+    setEjecutivoFiltro(nuevoFiltro);
+
+    if (selectedPeriodo === 'personalizado' && fechaInicio && fechaFin) {
+      cargarEventos('personalizado', fechaInicio, fechaFin, departamentoFiltro, nuevoFiltro);
+    } else {
+      cargarEventos(selectedPeriodo, undefined, undefined, departamentoFiltro, nuevoFiltro);
+    }
+  }, [selectedPeriodo, fechaInicio, fechaFin, departamentoFiltro, cargarEventos]);
 
   // Handler para descargar Excel
   const handleDescargarExcel = async () => {
@@ -164,11 +257,17 @@ export default function EventosPage() {
     setIsDescargandoExcel(true);
     try {
       let filtroInfo = '';
-      
+
       if (departamentoFiltro) {
         filtroInfo += `dep_${departamentoFiltro.replace(/\s+/g, '_')}`;
       }
-      
+
+      if (ejecutivoFiltro) {
+        filtroInfo += filtroInfo ? '_' : '';
+        const nombreCorto = ejecutivoFiltro.substring(0, 20).replace(/\s+/g, '_');
+        filtroInfo += `ejec_${nombreCorto}`;
+      }
+
       if (selectedPeriodo !== 'hoy') {
         filtroInfo += filtroInfo ? '_' : '';
         if (selectedPeriodo === 'personalizado') {
@@ -178,7 +277,7 @@ export default function EventosPage() {
           filtroInfo += selectedPeriodo;
         }
       }
-      
+
       descargarExcel(eventosFiltrados, filtroInfo);
     } catch (error) {
       console.error('Error al descargar Excel:', error);
@@ -188,40 +287,97 @@ export default function EventosPage() {
     }
   };
 
-  // Handler para cambiar período
+  // Handler para cambiar período - CORREGIDO
   const handlePeriodoChange = (periodo: 'hoy' | '7dias' | '30dias' | 'personalizado') => {
+    console.log(`📅 Cambiando período a: ${periodo}`);
     setSelectedPeriodo(periodo);
-    if (periodo !== 'personalizado') {
-      cargarEventos(periodo);
+    
+    // Siempre usar fecha LOCAL
+    const hoy = new Date();
+    const fechaHoy = getLocalDateString();
+    
+    switch (periodo) {
+      case 'hoy':
+        setFechaInicio(fechaHoy);
+        setFechaFin(fechaHoy);
+        cargarEventos('hoy', undefined, undefined, departamentoFiltro, ejecutivoFiltro);
+        break;
+      case '7dias':
+        const hace7Dias = new Date(hoy);
+        hace7Dias.setDate(hoy.getDate() - 6);
+        setFechaInicio(formatDateForInput(hace7Dias));
+        setFechaFin(fechaHoy);
+        cargarEventos('7dias', undefined, undefined, departamentoFiltro, ejecutivoFiltro);
+        break;
+      case '30dias':
+        const hace30Dias = new Date(hoy);
+        hace30Dias.setDate(hoy.getDate() - 29);
+        setFechaInicio(formatDateForInput(hace30Dias));
+        setFechaFin(fechaHoy);
+        cargarEventos('30dias', undefined, undefined, departamentoFiltro, ejecutivoFiltro);
+        break;
+      case 'personalizado':
+        // Mantener las fechas actuales
+        if (fechaInicio && fechaFin) {
+          cargarEventos('personalizado', fechaInicio, fechaFin, departamentoFiltro, ejecutivoFiltro);
+        }
+        break;
     }
+    
+    console.log('📅 Fechas actualizadas (LOCAL):', {
+      periodo,
+      fechaInicio: periodo === 'hoy' ? fechaHoy : fechaInicio,
+      fechaFin: periodo === 'hoy' ? fechaHoy : fechaFin
+    });
   };
 
   // Handler para cambiar fechas
   const handleFechasChange = (inicio: string, fin: string) => {
+    console.log(`📆 Cambiando fechas: ${inicio} - ${fin}`);
     setFechaInicio(inicio);
     setFechaFin(fin);
   };
 
   // Handler para refresh
   const handleRefresh = () => {
+    console.log('🔄 Refrescando eventos...');
     if (selectedPeriodo === 'personalizado' && fechaInicio && fechaFin) {
-      cargarEventos('personalizado', fechaInicio, fechaFin);
+      cargarEventos('personalizado', fechaInicio, fechaFin, departamentoFiltro, ejecutivoFiltro);
     } else {
-      cargarEventos(selectedPeriodo);
+      cargarEventos(selectedPeriodo, undefined, undefined, departamentoFiltro, ejecutivoFiltro);
     }
   };
 
   // Cargar datos iniciales
   useEffect(() => {
-    cargarEventos('hoy');
+    const timer = setTimeout(() => {
+      console.log('📅 Cargando datos iniciales...');
+      console.log('📅 Fecha actual LOCAL:', getLocalDateString());
+      console.log('📅 Fecha actual UTC:', new Date().toISOString().split('T')[0]);
+      cargarEventos('hoy', undefined, undefined, null, null);
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, []);
 
   // Auto-buscar en personalizado cuando cambian las fechas
   useEffect(() => {
     if (selectedPeriodo === 'personalizado' && fechaInicio && fechaFin) {
-      cargarEventos('personalizado', fechaInicio, fechaFin);
+      console.log(`🔄 Cargando eventos personalizados: ${fechaInicio} - ${fechaFin}`);
+      cargarEventos('personalizado', fechaInicio, fechaFin, departamentoFiltro, ejecutivoFiltro);
     }
-  }, [fechaInicio, fechaFin, selectedPeriodo]);
+  }, [fechaInicio, fechaFin, selectedPeriodo, departamentoFiltro, ejecutivoFiltro, cargarEventos]);
+
+  // Debug: mostrar estado de fechas
+  useEffect(() => {
+    console.log('📅 Estado actual de fechas:', {
+      selectedPeriodo,
+      fechaInicio,
+      fechaFin,
+      hoyLocal: getLocalDateString(),
+      hoyUTC: new Date().toISOString().split('T')[0]
+    });
+  }, [selectedPeriodo, fechaInicio, fechaFin]);
 
   return (
     <IdleSessionProtector timeoutMinutes={15}>
@@ -230,9 +386,11 @@ export default function EventosPage() {
         <div className="min-h-screen bg-gray-50">
           <div className="container mx-auto">
             <HeaderEventos
-              estadisticas={estadisticasDepartamentos}
+              estadisticas={estadisticas}
               departamentoFiltro={departamentoFiltro}
+              ejecutivoFiltro={ejecutivoFiltro}
               onFiltroChange={handleFiltroDepartamento}
+              onEjecutivoChange={handleFiltroEjecutivo}
               eventosCount={eventosFiltrados.length}
               onRefresh={handleRefresh}
               isRefreshing={isLoading}
@@ -244,7 +402,6 @@ export default function EventosPage() {
             />
 
             <div className="px-4 pb-8">
-              
               {/* Botón de descarga */}
               <div className="mb-4 flex justify-end">
                 <button
@@ -267,7 +424,43 @@ export default function EventosPage() {
                   )}
                 </button>
               </div>
-              
+
+              {/* Indicadores de filtros activos */}
+              {(departamentoFiltro || ejecutivoFiltro) && (
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {departamentoFiltro && (
+                    <div className="inline-flex items-center px-3 py-1.5 bg-emerald-100 text-emerald-800 rounded-full text-sm font-medium border border-emerald-200">
+                      <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      </svg>
+                      Departamento: {departamentoFiltro}
+                    </div>
+                  )}
+
+                  {ejecutivoFiltro && (
+                    <div className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-800 rounded-full text-sm font-medium border border-blue-200">
+                      <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      Ejecutivo: {ejecutivoFiltro}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      handleFiltroDepartamento(null);
+                      handleFiltroEjecutivo(null);
+                    }}
+                    className="inline-flex items-center px-3 py-1.5 bg-gray-100 text-gray-800 rounded-full text-sm font-medium border border-gray-200 hover:bg-gray-200 transition-colors"
+                  >
+                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Limpiar filtros
+                  </button>
+                </div>
+              )}
+
               <EventosTable
                 eventos={eventosFiltrados}
                 isLoading={isLoading}
