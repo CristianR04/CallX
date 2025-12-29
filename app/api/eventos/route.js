@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db'; // Importa tu función query de PostgreSQL
+import { query } from '@/lib/db';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -11,55 +11,54 @@ export async function GET(request) {
   const startTime = Date.now();
 
   try {
-    // OBTENER FECHA REAL DESDE POSTGRESQL
-    const fechaDBResult = await query('SELECT CURRENT_DATE as hoy_real');
-    const hoyReal = fechaDBResult.rows[0].hoy_real;
+    // Obtener fecha actual en formato YYYY-MM-DD
+    const fechaDBResult = await query(`
+      SELECT 
+        CURRENT_DATE as hoy_real,
+        TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD') as hoy_formateado
+    `);
 
-    const fechaSistema = new Date();
-
-    console.log('🕐 COMPARACIÓN DE FECHAS JS:', {
-      fecha_sistema: fechaSistema.toISOString().split('T')[0],
-      fecha_postgres: hoyReal,
-      diferencia_dias: Math.floor((fechaSistema.getTime() - new Date(hoyReal).getTime()) / (1000 * 60 * 60 * 24))
-    });
+    const hoyReal = fechaDBResult.rows[0].hoy_formateado; // "2025-12-28"
 
     let fechaInicioStr, fechaFinStr;
-    const hoy = new Date(hoyReal); // Usar fecha real
 
-    switch (rango) {
-      case 'hoy':
-        fechaInicioStr = fechaFinStr = hoyReal; // Usar fecha real
-        break;
-      case '7dias':
-        const hace7Dias = new Date(hoy);
-        hace7Dias.setDate(hoy.getDate() - 6);
-        fechaInicioStr = hace7Dias.toISOString().split('T')[0];
-        fechaFinStr = hoyReal;
-        break;
-      case '30dias':
-        const hace30Dias = new Date(hoy);
-        hace30Dias.setDate(hoy.getDate() - 29);
-        fechaInicioStr = hace30Dias.toISOString().split('T')[0];
-        fechaFinStr = hoyReal;
-        break;
-      case 'personalizado':
-        if (fechaInicio && fechaFin) {
-          fechaInicioStr = fechaInicio;
-          fechaFinStr = fechaFin;
-        } else {
+    if (rango === 'personalizado' && fechaInicio && fechaFin) {
+      fechaInicioStr = fechaInicio;
+      fechaFinStr = fechaFin;
+    } else {
+      const hoy = new Date(hoyReal);
+
+      switch (rango) {
+        case 'hoy':
           fechaInicioStr = fechaFinStr = hoyReal;
-        }
-        break;
-      default:
-        fechaInicioStr = fechaFinStr = hoyReal;
+          break;
+        case '7dias':
+          const hace7Dias = new Date(hoy);
+          hace7Dias.setDate(hoy.getDate() - 6);
+          fechaInicioStr = hace7Dias.toISOString().split('T')[0];
+          fechaFinStr = hoyReal;
+          break;
+        case '30dias':
+          const hace30Dias = new Date(hoy);
+          hace30Dias.setDate(hoy.getDate() - 29);
+          fechaInicioStr = hace30Dias.toISOString().split('T')[0];
+          fechaFinStr = hoyReal;
+          break;
+        default:
+          fechaInicioStr = fechaFinStr = hoyReal;
+      }
     }
 
-    console.log(`📅 Consultando eventos del ${fechaInicioStr} al ${fechaFinStr}`);
-    console.log(`🔍 Filtros - Departamento: ${departamento || 'Ninguno'}, Ejecutivo: ${ejecutivo || 'Ninguno'}`);
-    console.log(`📊 Fecha REAL PostgreSQL: ${hoyReal}, Fecha Sistema JS: ${fechaSistema.toISOString().split('T')[0]}`);
+    console.log(`📅 Consultando eventos del ${fechaInicioStr} al ${fechaFinStr} (rango: ${rango})`);
 
+    if (departamento) {
+      console.log(`🔍 Filtro departamento: ${departamento}`);
+    }
+    if (ejecutivo) {
+      console.log(`🔍 Filtro ejecutivo: ${ejecutivo}`);
+    }
 
-    // Construir la consulta SQL base para PostgreSQL
+    // Construir la consulta SQL base
     let queryText = `
       SELECT 
         eb.id,
@@ -91,7 +90,7 @@ export async function GET(request) {
     `;
 
     const params = [fechaInicioStr, fechaFinStr];
-    let paramIndex = 3; // PostgreSQL usa $1, $2, etc.
+    let paramIndex = 3;
 
     // Aplicar filtro por departamento
     if (departamento && departamento !== 'Todos' && departamento !== 'todos') {
@@ -111,13 +110,19 @@ export async function GET(request) {
     // Ordenar resultados
     queryText += ` ORDER BY eb.fecha DESC, eb.hora_entrada DESC`;
 
-    console.log(`📊 Consulta SQL: ${queryText.substring(0, 200)}...`);
-    console.log(`📋 Parámetros:`, params);
-
-    // Ejecutar consulta con PostgreSQL
+    // Ejecutar consulta
     const result = await query(queryText, params);
     const rows = result.rows;
     console.log(`✅ Eventos obtenidos: ${rows.length}`);
+
+    // Si no hay eventos, verificar si hay datos en la tabla
+    if (rows.length === 0) {
+      const checkQuery = await query(
+        'SELECT COUNT(*) as total FROM eventos_biometricos WHERE fecha = $1',
+        [fechaInicioStr]
+      );
+      console.log(`ℹ️ Verificación: ${checkQuery.rows[0].total} eventos en BD para ${fechaInicioStr}`);
+    }
 
     // Procesar resultados
     const eventos = rows.map(row => ({
@@ -159,7 +164,7 @@ export async function GET(request) {
       estadisticasPorCampana[campana].usuarios.add(row.nombre);
     });
 
-    // Convertir Sets a arrays y calcular usuarios únicos
+    // Convertir Sets a arrays
     Object.keys(estadisticasPorCampana).forEach(campana => {
       estadisticasPorCampana[campana] = {
         total: estadisticasPorCampana[campana].total,
@@ -167,7 +172,7 @@ export async function GET(request) {
       };
     });
 
-    // Obtener lista de ejecutivos únicos para el Header
+    // Obtener lista de ejecutivos únicos
     const ejecutivosUnicos = Array.from(
       new Set(rows.map(row => row.nombre).filter(Boolean))
     ).sort();
@@ -180,7 +185,7 @@ export async function GET(request) {
       eventos,
       estadisticas: {
         porCampaña: estadisticasPorCampana,
-        ejecutivos: ejecutivosUnicos, // ¡IMPORTANTE! Para el filtro en Header
+        ejecutivos: ejecutivosUnicos,
         total: eventos.length,
         tiempoSegundos: parseFloat(duration)
       },

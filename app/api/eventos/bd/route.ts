@@ -3,7 +3,6 @@ import { Client } from 'pg';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 
-
 const DB_CONFIG = {
   host: process.env.DB_HOST,
   port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : undefined,
@@ -20,26 +19,11 @@ const CAMPAIGNS_MAP: Record<string, string> = {
   'campana_parlo': 'Campana PARLO',
   'ti': 'TI',
   'teams_leaders': 'Teams Leaders',
-  'administrativo': 'Administrativo',
-  'campaña_5757': 'Campana 5757',
-  'campaña_sav': 'Campana SAV',
-  'campaña_refi': 'Campana REFI',
-  'campaña_pl': 'Campana PL',
-  'campaña_parlo': 'Campana PARLO',
-  'campaña_PARLO': 'Campana PARLO',
-  'CAMPANA_5757': 'Campana 5757',
-  'CAMPANA_SAV': 'Campana SAV',
-  'CAMPANA_REFI': 'Campana REFI',
-  'CAMPANA_PL': 'Campana PL',
-  'CAMPANA_PARLO': 'Campana PARLO',
-  'TI': 'TI',
-  'TEAMS_LEADERS': 'Teams Leaders',
-  'ADMINISTRATIVO': 'Administrativo'
+  'administrativo': 'Administrativo'
 };
 
 function normalizeCampaignCode(code: string | null | undefined): string | null {
   if (!code) return null;
-
   return code
     .toLowerCase()
     .normalize('NFD')
@@ -48,20 +32,17 @@ function normalizeCampaignCode(code: string | null | undefined): string | null {
 
 function getCampaignName(campanaCode: string | null | undefined): string {
   if (!campanaCode) return 'Sin grupo';
-
   const normalized = normalizeCampaignCode(campanaCode);
   if (!normalized) return 'Sin grupo';
 
   const key = Object.keys(CAMPAIGNS_MAP).find(k =>
     normalizeCampaignCode(k) === normalized
   );
-
   return key ? CAMPAIGNS_MAP[key] : campanaCode;
 }
 
 function getCampaignVariantsForDB(campaign: string | undefined): string[] {
   if (!campaign) return [];
-
   const normalized = normalizeCampaignCode(campaign);
   if (!normalized) return [];
 
@@ -73,13 +54,11 @@ function getCampaignVariantsForDB(campaign: string | undefined): string[] {
   if (visualName && !variants.includes(visualName)) {
     variants.push(visualName);
   }
-
   return variants;
 }
 
 function normalizarCampana(campana: string | null): string | null {
   if (!campana) return null;
-
   return campana
     .toLowerCase()
     .normalize('NFD')
@@ -90,7 +69,6 @@ function normalizarCampana(campana: string | null): string | null {
 
 function esCampanaVentas(campana: string | null): boolean {
   if (!campana) return false;
-
   const normalizada = normalizarCampana(campana);
   if (!normalizada) return false;
 
@@ -103,17 +81,14 @@ function esCampanaVentas(campana: string | null): boolean {
     'sales',
     'ventas_consolidado'
   ];
-
   return ventasVariants.includes(normalizada);
 }
 
 function obtenerDepartamentosTeamLeader(campana: string | null): string[] {
   if (!campana) return [];
-
   if (esCampanaVentas(campana)) {
     return ['Campana SAV', 'Campana REFI', 'Campana PL'];
   }
-
   const normalizada = normalizarCampana(campana);
   if (!normalizada) return [];
 
@@ -126,7 +101,6 @@ function obtenerDepartamentosTeamLeader(campana: string | null): string[] {
     'administrativo': 'Administrativo',
     'teams_leaders': 'Teams Leaders'
   };
-
   const department = campaignMap[normalizada] || campana;
   return [department];
 }
@@ -201,33 +175,8 @@ const determinarEstado = (subtipo: string, fecha: string) => {
       color: '#6c757d',
       icono: '📭',
       prioridad: 6
-    },
-    'Entrada y Salida': {
-      estado: 'COMPLETO',
-      color: '#28a745',
-      icono: '✅',
-      prioridad: 1
-    },
-    'Entrada y Salida Almuerzo': {
-      estado: 'COMPLETO',
-      color: '#28a745',
-      icono: '✅',
-      prioridad: 1
-    },
-    'Solo Entrada': {
-      estado: esHoy ? 'PENDIENTE' : 'INCOMPLETO',
-      color: esHoy ? '#ffc107' : '#dc3545',
-      icono: esHoy ? '⏳' : '⚠️',
-      prioridad: 3
-    },
-    'Solo Salida': {
-      estado: esHoy ? 'PENDIENTE' : 'INCOMPLETO',
-      color: esHoy ? '#ffc107' : '#dc3545',
-      icono: esHoy ? '⏳' : '⚠️',
-      prioridad: 3
     }
   };
-
   return estados[subtipo] || {
     estado: 'DESCONOCIDO',
     color: '#6c757d',
@@ -246,7 +195,6 @@ const formatearHora = (hora: any): string => {
 
 const calcularDuracionAlmuerzo = (horaSalida: string | null, horaEntrada: string | null): string | null => {
   if (!horaSalida || !horaEntrada) return null;
-
   try {
     const [h1, m1] = horaSalida.split(':').map(Number);
     const [h2, m2] = horaEntrada.split(':').map(Number);
@@ -256,7 +204,6 @@ const calcularDuracionAlmuerzo = (horaSalida: string | null, horaEntrada: string
 
     const horas = Math.floor(diferencia / 60);
     const minutos = diferencia % 60;
-
     return `${horas > 0 ? `${horas}h ` : ''}${minutos}m`;
   } catch (error) {
     return null;
@@ -277,7 +224,6 @@ export async function GET(request: Request) {
 
   try {
     const session = await getServerSession(authOptions);
-
     if (!session || !session.user) {
       return NextResponse.json(
         { success: false, error: 'No autorizado' },
@@ -301,30 +247,28 @@ export async function GET(request: Request) {
       fechaInicio,
       fechaFin,
       departamento,
-      ejecutivo,
-      userRole,
-      userCampaign
+      ejecutivo
     });
 
-    // CONECTAR PRIMERO A LA BASE DE DATOS
+    // Conectar a la base de datos
     client = new Client(DB_CONFIG);
     await client.connect();
 
-    // OBTENER FECHA REAL DESDE POSTGRESQL
-    const fechaDBResult = await client.query('SELECT CURRENT_DATE as hoy_real');
-    const hoyReal = fechaDBResult.rows[0].hoy_real;
+    // Obtener fecha actual en Colombia (formato YYYY-MM-DD)
+    const fechaDBResult = await client.query(
+      `SELECT 
+        CURRENT_DATE as hoy_real,
+        TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD') as hoy_formateado,
+        NOW() as ahora_completo`
+    );
 
-    // OBTENER FECHA DEL SISTEMA PARA COMPARAR
-    const fechaSistema = new Date();
+    const hoyReal = fechaDBResult.rows[0].hoy_formateado;
+    const hoyTimestamp = fechaDBResult.rows[0].hoy_real;
 
-    console.log('🕐 COMPARACIÓN DE FECHAS:', {
-      fecha_sistema: fechaSistema.toISOString().split('T')[0],
-      fecha_postgres: hoyReal,
-      diferencia_dias: Math.floor((fechaSistema.getTime() - new Date(hoyReal).getTime()) / (1000 * 60 * 60 * 24))
+    console.log('📅 Fecha obtenida de PostgreSQL:', {
+      hoy_formateado: hoyReal,
+      hoy_timestamp: hoyTimestamp
     });
-
-    // USAR SIEMPRE LA FECHA DE POSTGRESQL
-    const hoy = new Date(hoyReal);
 
     let inicio: string, fin: string;
 
@@ -332,19 +276,21 @@ export async function GET(request: Request) {
       inicio = fechaInicio;
       fin = fechaFin;
     } else {
+      const hoyDate = new Date(hoyReal);
+
       switch (rango) {
         case 'hoy':
-          inicio = fin = hoyReal; // Usar la fecha REAL de PostgreSQL
+          inicio = fin = hoyReal;
           break;
         case '7dias':
-          const hace7Dias = new Date(hoy);
-          hace7Dias.setDate(hoy.getDate() - 6);
+          const hace7Dias = new Date(hoyDate);
+          hace7Dias.setDate(hoyDate.getDate() - 6);
           inicio = hace7Dias.toISOString().split('T')[0];
           fin = hoyReal;
           break;
         case '30dias':
-          const hace30Dias = new Date(hoy);
-          hace30Dias.setDate(hoy.getDate() - 29);
+          const hace30Dias = new Date(hoyDate);
+          hace30Dias.setDate(hoyDate.getDate() - 29);
           inicio = hace30Dias.toISOString().split('T')[0];
           fin = hoyReal;
           break;
@@ -353,26 +299,38 @@ export async function GET(request: Request) {
       }
     }
 
-    console.log('📅 FECHAS PARA CONSULTA:', {
-      fecha_real_postgres: hoyReal,
-      fecha_consultada: inicio,
-      fin: fin,
-      rango,
-      diferencia_sistema_vs_postgres: fechaSistema.getDate() - new Date(hoyReal).getDate()
+    console.log('📅 Fechas para consulta:', {
+      inicio,
+      fin,
+      rango
+    });
+
+    // VERIFICAR SI HAY DATOS EN LA TABLA
+    const verificarTabla = await client.query(
+      `SELECT 
+        COUNT(*) as total_registros,
+        MIN(fecha) as fecha_minima,
+        MAX(fecha) as fecha_maxima
+      FROM eventos_procesados`
+    );
+
+    console.log('📊 Verificación de tabla eventos_procesados:', {
+      total_registros: verificarTabla.rows[0].total_registros,
+      fecha_minima: verificarTabla.rows[0].fecha_minima,
+      fecha_maxima: verificarTabla.rows[0].fecha_maxima
     });
 
     let userCampaignNormalized = getCampaignName(userCampaign);
     let filteredByUserCampaign = false;
     let appliedFilterDescription = null;
-
     let esTeamLeaderVentas = esCampanaVentas(userCampaign);
 
-    // Construir la consulta base
+    // IMPORTANTE: Como 'fecha' es timestamp with time zone, necesitamos usar DATE() para extraer solo la fecha
     let query = `
       SELECT 
         ep.documento as "empleadoId",
         COALESCE(uh.nombre, ep.nombre) as "nombre",
-        ep.fecha,
+        DATE(ep.fecha) as "fecha",  -- Extraer solo la fecha del timestamp
         ep.hora_entrada as "horaEntrada",
         ep.hora_salida as "horaSalida",
         ep.hora_salida_almuerzo as "horaSalidaAlmuerzo",
@@ -383,29 +341,29 @@ export async function GET(request: Request) {
         COALESCE(uh.departamento, ep.campaña, 'Sin grupo') as "campañaRaw"
       FROM eventos_procesados ep
       LEFT JOIN usuarios_hikvision uh ON ep.documento = uh.employee_no
-      WHERE ep.fecha >= $1 AND ep.fecha <= $2
+      WHERE DATE(ep.fecha) >= $1::date AND DATE(ep.fecha) <= $2::date  -- Convertir a date para comparar
     `;
 
     const queryParams: any[] = [inicio, fin];
     let paramCounter = 3;
 
-    // Aplicar filtro por departamento (si se proporciona)
+    // Aplicar filtro por departamento
     if (departamento && departamento !== 'Todos' && departamento !== 'todos') {
       query += ` AND (uh.departamento ILIKE $${paramCounter} OR ep.campaña ILIKE $${paramCounter})`;
       queryParams.push(`%${departamento}%`);
       paramCounter++;
-      console.log(`🏢 Filtro departamento aplicado: ${departamento}`);
+      console.log(`🏢 Aplicando filtro departamento: ${departamento}`);
     }
 
-    // Aplicar filtro por ejecutivo (si se proporciona)
+    // Aplicar filtro por ejecutivo
     if (ejecutivo && ejecutivo.trim() !== '') {
       query += ` AND COALESCE(uh.nombre, ep.nombre) ILIKE $${paramCounter}`;
       queryParams.push(`%${ejecutivo}%`);
       paramCounter++;
-      console.log(`👤 Filtro ejecutivo aplicado: ${ejecutivo}`);
+      console.log(`👤 Aplicando filtro ejecutivo: ${ejecutivo}`);
     }
 
-    // Si es Team Leader o Agente, aplicar sus restricciones
+    // Si es Team Leader o Agente, aplicar restricciones
     if (userRole === 'Team Leader' || userRole === 'Agente' || userRole === 'Supervisor') {
       if (esTeamLeaderVentas) {
         userCampaignNormalized = 'Ventas Consolidado';
@@ -414,68 +372,51 @@ export async function GET(request: Request) {
         const ventasDepartments = obtenerDepartamentosTeamLeader(userCampaign);
         if (ventasDepartments.length > 0) {
           const conditions: string[] = [];
-
           ventasDepartments.forEach((dept, idx) => {
             const paramIndex = paramCounter;
             queryParams.push(`%${dept}%`);
             conditions.push(`uh.departamento ILIKE $${paramIndex}`);
-
-            const paramIndex2 = paramCounter + 1;
-
-            if (dept === 'Campana SAV') {
-              queryParams.push(`%ventas%`);
-              conditions.push(`ep.campaña ILIKE $${paramIndex2}`);
-            } else {
-              queryParams.push(`%${dept.replace('Campana ', '')}%`);
-              conditions.push(`ep.campaña ILIKE $${paramIndex2}`);
-            }
-
-            paramCounter += 2;
+            paramCounter++;
           });
-
           if (conditions.length > 0) {
             query += ` AND (${conditions.join(' OR ')})`;
           }
         }
-
       } else if (userCampaignNormalized && !departamento) {
-        // Solo aplicar filtro de campaña si no hay un filtro de departamento específico
         const campaignVariants = getCampaignVariantsForDB(userCampaign);
-
         if (campaignVariants.length > 0) {
           const conditions: string[] = [];
-
           campaignVariants.forEach((variant) => {
             const paramIndex = paramCounter;
             queryParams.push(`%${variant}%`);
             conditions.push(`(ep.campaña ILIKE $${paramIndex} OR uh.departamento ILIKE $${paramIndex})`);
             paramCounter++;
           });
-
           if (conditions.length > 0) {
             query += ` AND (${conditions.join(' OR ')})`;
           }
         }
       }
-
       filteredByUserCampaign = true;
-    } else if (userRole === 'TI' || userRole === 'Administrador') {
-      filteredByUserCampaign = false;
-    } else {
-      filteredByUserCampaign = true;
-      appliedFilterDescription = userCampaignNormalized;
     }
 
     query += ` ORDER BY ep.fecha DESC, ep.hora_entrada DESC`;
 
-    console.log('📊 Consulta SQL:', query);
+    console.log('📊 Consulta SQL:', query.substring(0, 200) + '...');
     console.log('📋 Parámetros:', queryParams);
 
     const result = await client.query(query, queryParams);
-
     console.log(`✅ Eventos obtenidos: ${result.rows.length}`);
 
-    // Extraer lista de ejecutivos únicos para el Header
+    // Mostrar algunos registros para debug
+    if (result.rows.length > 0) {
+      console.log('📋 Primeros registros encontrados:');
+      result.rows.slice(0, 3).forEach((row, i) => {
+        console.log(`  ${i + 1}. ${row.nombre} - ${row.fecha} - ${row.horaEntrada || 'Sin hora'}`);
+      });
+    }
+
+    // Extraer lista de ejecutivos únicos
     const ejecutivosUnicos = Array.from(
       new Set(result.rows.map(row => row.nombre).filter(Boolean))
     ).sort() as string[];
@@ -484,7 +425,6 @@ export async function GET(request: Request) {
       const estadoInfo = determinarEstado(evento.subtipo, evento.fecha);
       const faltas = determinarFaltas(evento);
       const duracionAlmuerzo = calcularDuracionAlmuerzo(evento.horaSalidaAlmuerzo, evento.horaEntradaAlmuerzo);
-
       const campañaNormalizada = getCampaignName(evento.campañaRaw) || evento.campañaRaw;
 
       return {
@@ -507,13 +447,12 @@ export async function GET(request: Request) {
         necesitaRevision: estadoInfo.estado === 'ERROR' || estadoInfo.estado === 'INCOMPLETO',
         tieneAlmuerzoCompleto: !!evento.horaSalidaAlmuerzo && !!evento.horaEntradaAlmuerzo,
         dispositivo: evento.dispositivo || 'Desconocido',
-        foto: evento.foto || '',
         campaña: campañaNormalizada,
         campañaOriginal: evento.campañaRaw
       };
     });
 
-    // Calcular estadísticas por campaña
+    // Calcular estadísticas
     const porCampaña = eventosFormateados.reduce((acc, evento) => {
       const camp = evento.campaña;
       if (!acc[camp]) {
@@ -524,7 +463,6 @@ export async function GET(request: Request) {
       return acc;
     }, {} as Record<string, any>);
 
-    // Convertir Sets a números
     Object.keys(porCampaña).forEach(campana => {
       porCampaña[campana] = {
         total: porCampaña[campana].total,
@@ -538,8 +476,7 @@ export async function GET(request: Request) {
       total: eventosFormateados.length,
       estadisticas: {
         porCampaña: porCampaña,
-        ejecutivos: ejecutivosUnicos, // Lista de ejecutivos para el filtro
-        tiempoConsulta: 0
+        ejecutivos: ejecutivosUnicos
       },
       rango: {
         tipo: rango,
@@ -552,17 +489,9 @@ export async function GET(request: Request) {
         userCampaignNormalized: userCampaignNormalized,
         appliedFilter: appliedFilterDescription,
         esTeamLeaderVentas,
-        filteredByUserCampaign: filteredByUserCampaign,
-        departamentoFiltro: departamento,
-        ejecutivoFiltro: ejecutivo
+        filteredByUserCampaign: filteredByUserCampaign
       }
     };
-
-    console.log('📤 Enviando respuesta con:', {
-      eventos: eventosFormateados.length,
-      ejecutivos: ejecutivosUnicos.length,
-      estadisticas: Object.keys(porCampaña).length
-    });
 
     return NextResponse.json(responseData, {
       headers: {
@@ -572,7 +501,6 @@ export async function GET(request: Request) {
 
   } catch (error: any) {
     console.error('❌ Error en API eventos/bd:', error);
-
     return NextResponse.json({
       success: false,
       error: process.env.NODE_ENV === 'production'
@@ -590,7 +518,6 @@ export async function GET(request: Request) {
         'Cache-Control': 'no-store'
       }
     });
-
   } finally {
     if (client) {
       try {

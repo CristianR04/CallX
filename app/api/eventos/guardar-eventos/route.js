@@ -1,7 +1,8 @@
-// app/api/eventos/actualizar-eventos/route.js
+// C:\Users\jorge.gomez\Documents\Proyectos\CallX\app\api\eventos\guardar-eventos\route.js
+
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
-import { obtenerEventosDeHikvision } from '@/lib/db/eventos/database';
+import { obtenerEventosDeHikvision, obtenerEventosDeHikvisionRango } from '@/lib/db/eventos/database';
 
 // Configuración del pool de conexiones
 const pool = new Pool({
@@ -16,137 +17,184 @@ const pool = new Pool({
 });
 
 // ================================================
-// FUNCIONES AUXILIARES - CORREGIDAS
+// FUNCIONES AUXILIARES
 // ================================================
 
-// Función para convertir UTC a Hora Colombia (UTC-5)
-function convertirUTCaCOT(fechaUTC) {
-  if (!fechaUTC || isNaN(new Date(fechaUTC).getTime())) {
-    return { fechaCOT: null, horaCOT: null };
-  }
+// Función para extraer fecha y hora del formato Colombia (2025-12-04T07:40:07-05:00)
+function extraerFechaHoraColombia(timeString) {
+  if (!timeString) return { fecha: null, hora: null };
 
-  const fecha = new Date(fechaUTC);
-  // Restar 5 horas para convertir UTC a Colombia
-  const fechaCOT = new Date(fecha.getTime() - (5 * 60 * 60 * 1000));
-
-  const fechaStr = fechaCOT.toISOString().split('T')[0];
-  const horaStr = fechaCOT.toISOString().split('T')[1]?.substring(0, 8) || '00:00:00';
-
-  return { fechaCOT: fechaStr, horaCOT: horaStr };
-}
-
-// Función para determinar si una fecha es "hoy" en hora Colombia
-function esHoyEnCOT(fechaUTC) {
-  const hoyCOT = new Date();
-  // Ajustar a hora Colombia
-  hoyCOT.setHours(hoyCOT.getHours() - 5);
-  const hoyStr = hoyCOT.toISOString().split('T')[0];
-
-  const { fechaCOT } = convertirUTCaCOT(fechaUTC);
-  return fechaCOT === hoyStr;
-}
-
-// Función para obtener eventos de un rango específico (para eventos nocturnos)
-async function obtenerEventosConRangoAmplio() {
   try {
-    // Crear rango amplio para capturar eventos nocturnos
-    const hoy = new Date();
-    const inicio = new Date(hoy);
-    const fin = new Date(hoy);
+    console.log(`🕐 Procesando timeString: ${timeString}`);
 
-    // Rango: Desde ayer 18:00 hasta mañana 06:00 (hora Colombia)
-    inicio.setDate(inicio.getDate() - 1);
-    inicio.setHours(18, 0, 0, 0); // 6 PM de ayer (hora Colombia)
+    // El formato ya es Colombia: 2025-12-04T07:40:07-05:00
+    const [fecha, resto] = timeString.split('T');
+    if (!fecha || !resto) {
+      console.log(`❌ No se pudo dividir: ${timeString}`);
+      return { fecha: null, hora: null };
+    }
 
-    fin.setDate(fin.getDate() + 1);
-    fin.setHours(6, 0, 0, 0); // 6 AM de mañana (hora Colombia)
+    // Extraer solo la hora (HH:MM:SS) - puede terminar en -05:00 o Z
+    const horaPart = resto.split('-')[0].split('+')[0];
+    const hora = horaPart.substring(0, 8);
 
-    // Convertir a UTC para consulta a Hikvision
-    inicio.setHours(inicio.getHours() + 5); // Colombia → UTC
-    fin.setHours(fin.getHours() + 5); // Colombia → UTC
+    console.log(`✅ Extraído: fecha=${fecha}, hora=${hora}`);
+    return { fecha, hora };
+  } catch (error) {
+    console.error(`❌ Error extrayendo fecha/hora de ${timeString}:`, error.message);
+    return { fecha: null, hora: null };
+  }
+}
 
-    // Aquí necesitaríamos modificar obtenerEventosDeHikvision para aceptar fechas
-    // Por ahora, asumimos que ya maneja esto
-    const eventos = await obtenerEventosDeHikvision();
+// Función para obtener eventos de las últimas 24 horas
+async function obtenerEventos24Horas() {
+  try {
+    // Crear rango de 24 horas desde ahora (Colombia)
+    const ahora = new Date();
+    const hace24Horas = new Date(ahora.getTime() - (24 * 60 * 60 * 1000));
 
-    // Filtrar y convertir eventos
+    console.log('🕐 Rango de 24 horas para sincronización (Colombia):', {
+      ahora: ahora.toLocaleString('es-CO'),
+      hace_24h: hace24Horas.toLocaleString('es-CO')
+    });
+
+    // Usar la función que acepta rango personalizado
+    const eventos = await obtenerEventosDeHikvisionRango(hace24Horas, ahora);
+
+    console.log(`📊 Eventos crudos obtenidos de Hikvision: ${eventos.length}`);
+
+    // Mostrar algunos eventos crudos para debug
+    if (eventos.length > 0) {
+      console.log('📋 Primeros 3 eventos crudos:');
+      eventos.slice(0, 3).forEach((evento, i) => {
+        console.log(`  ${i + 1}. Time: ${evento.time}`);
+        console.log(`     Documento: ${evento.employeeNoString || evento.cardNo || 'N/A'}`);
+        console.log(`     Nombre: ${evento.name || 'Sin nombre'}`);
+        console.log(`     Tipo: ${evento.tipo || 'No definido'}`);
+      });
+    }
+
+    // Procesar eventos manteniendo hora Colombia
     const eventosProcesados = [];
 
     for (const evento of eventos) {
       try {
-        // Si el evento ya tiene fecha y hora, asumimos que vienen en UTC
-        if (evento.time || evento.fecha_hora) {
-          const fechaUTC = evento.time || evento.fecha_hora;
-          const { fechaCOT, horaCOT } = convertirUTCaCOT(fechaUTC);
+        if (evento.time) {
+          const { fecha, hora } = extraerFechaHoraColombia(evento.time);
 
-          if (fechaCOT && horaCOT) {
-            // Solo procesar eventos que caigan dentro del rango amplio de "hoy"
-            const fechaEvento = new Date(fechaCOT);
-            const hoyCOT = new Date();
-            hoyCOT.setHours(hoyCOT.getHours() - 5);
-            hoyCOT.setHours(0, 0, 0, 0);
-
-            const mañanaCOT = new Date(hoyCOT);
-            mañanaCOT.setDate(mañanaCOT.getDate() + 1);
-
-            // Si el evento es de hoy o de la madrugada de mañana (turno nocturno)
-            if (fechaEvento >= hoyCOT && fechaEvento < mañanaCOT) {
-              eventosProcesados.push({
-                ...evento,
-                fecha: fechaCOT,      // Fecha en COT
-                hora_simple: horaCOT, // Hora en COT
-                fecha_original: fechaUTC // Mantener original para debug
-              });
+          if (fecha && hora) {
+            // Documento del empleado
+            let documento = 'N/A';
+            if (evento.employeeNoString && evento.employeeNoString.trim() !== '') {
+              documento = evento.employeeNoString.trim();
+            } else if (evento.cardNo && evento.cardNo.trim() !== '') {
+              documento = evento.cardNo.trim();
             }
+
+            // Nombre del empleado
+            const nombre = evento.name ? evento.name.trim() : 'Sin nombre';
+
+            // Tipo de evento
+            let tipo = evento.tipo || 'Evento';
+            const label = evento.label || '';
+            const attendanceStatus = evento.attendanceStatus || '';
+
+            if (attendanceStatus === 'breakOut') tipo = 'Salida Almuerzo';
+            else if (attendanceStatus === 'breakIn') tipo = 'Entrada Almuerzo';
+            else if (label.toLowerCase().includes('almuerzo')) {
+              if (label.toLowerCase().includes('salida') || label.toLowerCase().includes('a almuerzo')) {
+                tipo = 'Salida Almuerzo';
+              } else if (label.toLowerCase().includes('entrada') || label.toLowerCase().includes('de almuerzo')) {
+                tipo = 'Entrada Almuerzo';
+              }
+            } else if (label.toLowerCase().includes('salida')) tipo = 'Salida';
+            else if (label.toLowerCase().includes('entrada')) tipo = 'Entrada';
+            else if (evento.minor === 75) tipo = evento.major === 5 ? 'Salida' : 'Entrada';
+
+            eventosProcesados.push({
+              ...evento,
+              documento: documento,
+              nombre: nombre,
+              fecha: fecha,      // Fecha en Colombia (ej: 2025-12-04)
+              hora_simple: hora, // Hora en Colombia (ej: 07:40:07)
+              time_original: evento.time,
+              tipo: tipo,
+              attendanceStatus: attendanceStatus,
+              label: label
+            });
+          } else {
+            console.log(`⚠️ Evento sin fecha/hora válida: ${evento.time}`);
           }
-        } else if (evento.fecha && evento.hora_simple) {
-          // Si ya vienen procesados, verificar que sean de hoy
-          if (esHoyEnCOT(`${evento.fecha}T${evento.hora_simple}`)) {
-            eventosProcesados.push(evento);
-          }
+        } else {
+          console.log(`⚠️ Evento sin propiedad 'time':`, evento);
         }
       } catch (error) {
-        console.error('Error procesando evento:', error.message);
+        console.error('❌ Error procesando evento individual:', error.message);
+        console.error('Evento que causó el error:', evento);
       }
     }
 
+    console.log(`✅ Eventos procesados (24h): ${eventosProcesados.length}`);
+
+    // Debug: mostrar primeros eventos procesados
+    if (eventosProcesados.length > 0) {
+      console.log('📋 Primeros 3 eventos procesados:');
+      eventosProcesados.slice(0, 3).forEach((evento, i) => {
+        console.log(`  ${i + 1}. ${evento.nombre} (${evento.documento})`);
+        console.log(`     Fecha: ${evento.fecha}, Hora: ${evento.hora_simple}`);
+        console.log(`     Tipo: ${evento.tipo}, Dispositivo: ${evento.dispositivo || 'N/A'}`);
+      });
+    }
+
     return eventosProcesados;
+
   } catch (error) {
-    console.error('Error obteniendo eventos con rango amplio:', error);
+    console.error('❌ Error obteniendo eventos de 24h:', error);
     return [];
   }
 }
 
-async function obtenerCampañaPorDocumento(documento, client) {
-  if (!documento || documento === 'N/A') return 'Sin grupo';
-
-  try {
-    const result = await client.query(
-      'SELECT departamento FROM usuarios_hikvision WHERE employee_no = $1',
-      [documento]
-    );
-    return result.rows.length > 0 ? result.rows[0].departamento : 'Sin grupo';
-  } catch (error) {
-    return 'Sin grupo';
-  }
-}
-
-// Función mejorada para agrupar eventos por documento y fecha COT
+// Función para agrupar eventos por documento y fecha Colombia
 async function procesarParaBD(eventos) {
-  // Agrupar por documento y fecha COT
+  console.log(`🔍 Procesando ${eventos.length} eventos para BD`);
+
+  // Debug: mostrar distribución de documentos
+  console.log('📊 Distribución de documentos en eventos:');
+  const documentosUnicos = [...new Set(eventos.map(e => e.documento))];
+  console.log(`  Documentos únicos: ${documentosUnicos.length}`);
+  console.log(`  Lista: ${documentosUnicos.slice(0, 10).join(', ')}${documentosUnicos.length > 10 ? '...' : ''}`);
+
+  // Agrupar por documento y fecha Colombia
   const eventosPorDocumentoFecha = {};
 
-  eventos.forEach((evento) => {
-    if (evento.documento === 'N/A') return;
+  eventos.forEach((evento, index) => {
+    // Debug: mostrar eventos sin documento válido
+    if (evento.documento === 'N/A' || !evento.documento || evento.documento.trim() === '') {
+      console.log(`⚠️ Evento ${index} sin documento válido:`, {
+        nombre: evento.nombre,
+        documento: evento.documento,
+        fecha: evento.fecha
+      });
+      return;
+    }
 
-    // Usar fecha en COT para agrupación
+    if (!evento.fecha || evento.fecha.trim() === '') {
+      console.log(`⚠️ Evento ${index} sin fecha válida:`, {
+        nombre: evento.nombre,
+        documento: evento.documento,
+        fecha: evento.fecha
+      });
+      return;
+    }
+
+    // Usar fecha en Colombia para agrupación
     const key = `${evento.documento}_${evento.fecha}`;
 
     if (!eventosPorDocumentoFecha[key]) {
       eventosPorDocumentoFecha[key] = {
         documento: evento.documento,
         nombre: evento.nombre || 'Sin nombre',
-        fecha: evento.fecha, // Fecha en COT
+        fecha: evento.fecha, // Fecha en Colombia
         eventos: []
       };
     }
@@ -154,34 +202,61 @@ async function procesarParaBD(eventos) {
     eventosPorDocumentoFecha[key].eventos.push(evento);
   });
 
+  console.log(`📊 Grupos creados: ${Object.keys(eventosPorDocumentoFecha).length}`);
+
+  // Mostrar primeros grupos
+  const primerosGrupos = Object.entries(eventosPorDocumentoFecha).slice(0, 5);
+  primerosGrupos.forEach(([key, grupo], i) => {
+    console.log(`  Grupo ${i + 1}: ${key} - ${grupo.eventos.length} eventos`);
+  });
+
+  if (Object.keys(eventosPorDocumentoFecha).length === 0) {
+    console.log('❌ No se crearon grupos. Posibles problemas:');
+    console.log('   1. Documentos todos son "N/A"');
+    console.log('   2. Fechas no se extrajeron correctamente');
+    console.log('   3. Campos requeridos faltan en los eventos');
+    return [];
+  }
+
   const registrosBD = [];
   const client = await pool.connect();
 
   try {
     for (const [key, grupo] of Object.entries(eventosPorDocumentoFecha)) {
+      console.log(`🔧 Procesando grupo: ${key} con ${grupo.eventos.length} eventos`);
+
       // Ordenar eventos por hora
       grupo.eventos.sort((a, b) => a.hora_simple.localeCompare(b.hora_simple));
 
-      // Identificar tipos de eventos
-      const entradas = grupo.eventos.filter(e =>
-        e.tipo === 'Entrada' || e.tipo.toLowerCase().includes('entrada')
-      );
+      // Identificar tipos de eventos con validación
+      const entradas = grupo.eventos.filter(e => {
+        const tipo = e.tipo || '';
+        return tipo === 'Entrada' || tipo.toLowerCase().includes('entrada');
+      });
 
-      const salidas = grupo.eventos.filter(e =>
-        e.tipo === 'Salida' || e.tipo.toLowerCase().includes('salida')
-      );
+      const salidas = grupo.eventos.filter(e => {
+        const tipo = e.tipo || '';
+        return tipo === 'Salida' || tipo.toLowerCase().includes('salida');
+      });
 
-      const entradasAlmuerzo = grupo.eventos.filter(e =>
-        e.tipo === 'Entrada Almuerzo' ||
-        (e.tipo.toLowerCase().includes('entrada') && e.tipo.toLowerCase().includes('almuerzo')) ||
-        (e.attendanceStatus && e.attendanceStatus === 'breakIn')
-      );
+      const entradasAlmuerzo = grupo.eventos.filter(e => {
+        const tipo = e.tipo || '';
+        const attendanceStatus = e.attendanceStatus || '';
+        return tipo === 'Entrada Almuerzo' ||
+          (tipo.toLowerCase().includes('entrada') && tipo.toLowerCase().includes('almuerzo')) ||
+          attendanceStatus === 'breakIn';
+      });
 
-      const salidasAlmuerzo = grupo.eventos.filter(e =>
-        e.tipo === 'Salida Almuerzo' ||
-        (e.tipo.toLowerCase().includes('salida') && e.tipo.toLowerCase().includes('almuerzo')) ||
-        (e.attendanceStatus && e.attendanceStatus === 'breakOut')
-      );
+      const salidasAlmuerzo = grupo.eventos.filter(e => {
+        const tipo = e.tipo || '';
+        const attendanceStatus = e.attendanceStatus || '';
+        return tipo === 'Salida Almuerzo' ||
+          (tipo.toLowerCase().includes('salida') && tipo.toLowerCase().includes('almuerzo')) ||
+          attendanceStatus === 'breakOut';
+      });
+
+      console.log(`   Encontrados: ${entradas.length} entradas, ${salidas.length} salidas`);
+      console.log(`                ${entradasAlmuerzo.length} entradas almuerzo, ${salidasAlmuerzo.length} salidas almuerzo`);
 
       // Tomar la primera entrada y última salida
       const primeraEntrada = entradas[0];
@@ -203,6 +278,8 @@ async function procesarParaBD(eventos) {
       } else if (primeraEntrada && ultimaSalida && (salidaAlmuerzo || entradaAlmuerzo)) {
         subtipo = 'Almuerzo parcial';
       }
+
+      console.log(`   Subtipo determinado: ${subtipo}`);
 
       // Validar que entrada y salida no tengan la misma hora
       let horaSalidaValida = ultimaSalida?.hora_simple || null;
@@ -230,7 +307,7 @@ async function procesarParaBD(eventos) {
         registrosBD.push({
           documento: grupo.documento,
           nombre: grupo.nombre,
-          fecha: grupo.fecha, // Fecha en COT
+          fecha: grupo.fecha, // Fecha en Colombia
           hora_entrada: primeraEntrada?.hora_simple || null,
           hora_salida: horaSalidaValida,
           hora_salida_almuerzo: salidaAlmuerzo?.hora_simple || null,
@@ -241,32 +318,68 @@ async function procesarParaBD(eventos) {
           imagen: foto,
           campaña: campaña
         });
+
+        console.log(`   ✅ Registro creado para ${grupo.nombre}`);
+      } else {
+        console.log(`   ⚠️ Grupo sin eventos válidos para registro`);
       }
     }
+  } catch (error) {
+    console.error('❌ Error en procesarParaBD:', error);
+    throw error;
   } finally {
     client.release();
   }
 
-  console.log(`Procesados ${registrosBD.length} registros para BD`);
+  console.log(`✅ Total registros procesados para BD: ${registrosBD.length}`);
   return registrosBD;
 }
 
+async function obtenerCampañaPorDocumento(documento, client) {
+  if (!documento || documento === 'N/A') return 'Sin grupo';
+
+  try {
+    const result = await client.query(
+      'SELECT departamento FROM usuarios_hikvision WHERE employee_no = $1',
+      [documento]
+    );
+    return result.rows.length > 0 ? result.rows[0].departamento : 'Sin grupo';
+  } catch (error) {
+    return 'Sin grupo';
+  }
+}
+
+
 // ================================================
-// FUNCIÓN PRINCIPAL DE SINCRONIZACIÓN - MEJORADA
+// FUNCIÓN PRINCIPAL DE SINCRONIZACIÓN
 // ================================================
 
 async function sincronizarEventos(fechaEspecifica = null) {
   const startTime = Date.now();
 
   try {
-    console.log(`Iniciando sincronización${fechaEspecifica ? ' para fecha: ' + fechaEspecifica : ' automática'}`);
+    console.log(`🔄 Iniciando sincronización${fechaEspecifica ? ' para fecha: ' + fechaEspecifica : ' de últimas 24 horas'}`);
 
-    // Obtener eventos con rango amplio para capturar nocturnos
-    const eventosHikvision = await obtenerEventosConRangoAmplio();
+    let eventosHikvision;
+
+    if (fechaEspecifica) {
+      // Para fecha específica, crear rango de ese día completo (Colombia)
+      const fechaEspecificaDate = new Date(fechaEspecifica);
+      const inicioFecha = new Date(fechaEspecificaDate);
+      inicioFecha.setHours(0, 0, 0, 0);
+
+      const finFecha = new Date(fechaEspecificaDate);
+      finFecha.setHours(23, 59, 59, 999);
+
+      eventosHikvision = await obtenerEventosDeHikvisionRango(inicioFecha, finFecha);
+    } else {
+      // Para sincronización automática, usar últimas 24 horas
+      eventosHikvision = await obtenerEventos24Horas();
+    }
 
     if (eventosHikvision.length === 0) {
       const tiempoTotal = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.log(`No se encontraron eventos para procesar`);
+      console.log(`⚠️ No se encontraron eventos para procesar`);
 
       return {
         eventos_obtenidos: 0,
@@ -275,11 +388,12 @@ async function sincronizarEventos(fechaEspecifica = null) {
         registros_actualizados: 0,
         tiempo_segundos: parseFloat(tiempoTotal),
         mensaje: 'No hay eventos para procesar',
-        fecha_procesada: fechaEspecifica || new Date().toISOString().split('T')[0]
+        fecha_procesada: fechaEspecifica || 'últimas 24 horas',
+        zona_horaria: 'Colombia (-05:00)'
       };
     }
 
-    console.log(`Obtenidos ${eventosHikvision.length} eventos para procesar`);
+    console.log(`📊 Obtenidos ${eventosHikvision.length} eventos para procesar`);
 
     // Procesar eventos para BD
     const registrosBD = await procesarParaBD(eventosHikvision);
@@ -294,7 +408,8 @@ async function sincronizarEventos(fechaEspecifica = null) {
         registros_actualizados: 0,
         tiempo_segundos: parseFloat(tiempoTotal),
         mensaje: 'Eventos no generaron registros válidos',
-        fecha_procesada: fechaEspecifica || new Date().toISOString().split('T')[0]
+        fecha_procesada: fechaEspecifica || 'últimas 24 horas',
+        zona_horaria: 'Colombia (-05:00)'
       };
     }
 
@@ -312,13 +427,13 @@ async function sincronizarEventos(fechaEspecifica = null) {
 
         if (existe.rows.length > 0) {
           await pool.query(`
-    UPDATE eventos_procesados SET
-      nombre = $1, hora_entrada = $2, hora_salida = $3,
-      hora_salida_almuerzo = $4, hora_entrada_almuerzo = $5,
-      tipo_evento = $6, subtipo_evento = $7, dispositivo_ip = $8,
-      imagen = $9, campaña = $10
-    WHERE documento = $11 AND fecha = $12
-  `, [
+            UPDATE eventos_procesados SET
+              nombre = $1, hora_entrada = $2, hora_salida = $3,
+              hora_salida_almuerzo = $4, hora_entrada_almuerzo = $5,
+              tipo_evento = $6, subtipo_evento = $7, dispositivo_ip = $8,
+              imagen = $9, campaña = $10
+            WHERE documento = $11 AND fecha = $12
+          `, [
             registro.nombre, registro.hora_entrada, registro.hora_salida,
             registro.hora_salida_almuerzo, registro.hora_entrada_almuerzo,
             registro.tipo_evento, registro.subtipo_evento, registro.dispositivo_ip,
@@ -349,7 +464,7 @@ async function sincronizarEventos(fechaEspecifica = null) {
 
     const tiempoTotal = ((Date.now() - startTime) / 1000).toFixed(2);
 
-    console.log(`Sincronización completada en ${tiempoTotal}s`);
+    console.log(`✅ Sincronización completada en ${tiempoTotal}s`);
     console.log(`Eventos: ${eventosHikvision.length} | Registros: ${registrosBD.length}`);
     console.log(`Nuevos: ${insertados} | Actualizados: ${actualizados} | Errores: ${errores}`);
 
@@ -360,12 +475,13 @@ async function sincronizarEventos(fechaEspecifica = null) {
       registros_actualizados: actualizados,
       errores: errores,
       tiempo_segundos: parseFloat(tiempoTotal),
-      fecha_procesada: fechaEspecifica || new Date().toISOString().split('T')[0],
-      hora_sincronizacion: new Date().toLocaleString('es-CO')
+      fecha_procesada: fechaEspecifica || 'últimas 24 horas',
+      hora_sincronizacion: new Date().toLocaleString('es-CO'),
+      zona_horaria: 'Colombia (-05:00)'
     };
 
   } catch (error) {
-    console.error('Error en sincronización:', error.message);
+    console.error('❌ Error en sincronización:', error.message);
     throw error;
   }
 }
@@ -380,15 +496,15 @@ let intervaloId = null;
 
 async function ejecutarSincronizacionAutomatica() {
   try {
-    console.log('Ejecutando sincronización automática...');
+    console.log('🔄 Ejecutando sincronización automática (24h)...');
     const resultado = await sincronizarEventos();
     ultimaEjecucion = new Date().toISOString();
 
     if (resultado.eventos_obtenidos > 0) {
-      console.log(`Sincronización automática OK: ${resultado.registros_procesados} registros`);
+      console.log(`✅ Sincronización automática OK: ${resultado.registros_procesados} registros`);
     }
   } catch (error) {
-    console.error('Error en sincronización automática:', error.message);
+    console.error('❌ Error en sincronización automática:', error.message);
   }
 }
 
@@ -396,12 +512,12 @@ function iniciarSincronizacionAutomatica() {
   if (sincronizacionActiva) return;
 
   sincronizacionActiva = true;
-  console.log('Iniciando sincronización automática...');
+  console.log('🚀 Iniciando sincronización automática (24h)...');
   ejecutarSincronizacionAutomatica();
 
   // Ejecutar cada 2 minutos
   intervaloId = setInterval(ejecutarSincronizacionAutomatica, 2 * 60 * 1000);
-  console.log('Sincronización automática iniciada (cada 2 minutos)');
+  console.log('📅 Sincronización automática iniciada (cada 2 minutos)');
 }
 
 function detenerSincronizacionAutomatica() {
@@ -410,11 +526,11 @@ function detenerSincronizacionAutomatica() {
     intervaloId = null;
   }
   sincronizacionActiva = false;
-  console.log('Sincronización automática detenida');
+  console.log('⏹️ Sincronización automática detenida');
 }
 
 // ================================================
-// ENDPOINTS - MEJORADOS
+// ENDPOINTS
 // ================================================
 
 export async function GET(request) {
@@ -437,12 +553,9 @@ export async function GET(request) {
           activa: sincronizacionActiva,
           ultima_ejecucion: ultimaEjecucion,
           proxima_ejecucion: proximaEjecucion?.toISOString(),
-          intervalo_minutos: 2
-        },
-        zona_horaria: {
-          sistema: 'UTC',
-          destino: 'COT (UTC-5)',
-          conversion_activa: true
+          intervalo_minutos: 2,
+          rango: 'Últimas 24 horas',
+          zona_horaria: 'Colombia (-05:00)'
         }
       });
     }
@@ -453,7 +566,8 @@ export async function GET(request) {
         success: true,
         message: 'Sincronización automática iniciada',
         intervalo: '2 minutos',
-        zona_horaria: 'UTC → COT (Colombia)'
+        rango: 'Últimas 24 horas',
+        zona_horaria: 'Colombia (-05:00)'
       });
     }
 
@@ -504,16 +618,16 @@ export async function GET(request) {
       });
     }
 
-    // Sincronización normal (hoy)
+    // Sincronización normal (últimas 24 horas)
     const resultado = await sincronizarEventos();
     return NextResponse.json({
       success: true,
-      message: 'Sincronización completada',
+      message: 'Sincronización de últimas 24 horas completada',
       ...resultado
     });
 
   } catch (error) {
-    console.error('Error en endpoint:', error.message);
+    console.error('❌ Error en endpoint:', error.message);
     return NextResponse.json({
       success: false,
       error: error.message,
@@ -539,5 +653,5 @@ function iniciarAutomaticamente() {
   }, 10000); // Esperar 10 segundos al iniciar
 }
 
-console.log('Módulo de sincronización cargado con soporte para eventos nocturnos y zona horaria');
+console.log('✅ Módulo de sincronización cargado');
 iniciarAutomaticamente();
