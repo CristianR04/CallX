@@ -4,13 +4,17 @@ import { NextResponse } from 'next/server';
 import DigestFetch from 'digest-fetch';
 import { Pool } from 'pg';
 
-// Configuración
+// Configuración - CAMBIADO A 1 MINUTO CON HORARIO RESTRINGIDO
 const CONFIG = {
     username: process.env.HIKUSER,
     password: process.env.HIKPASS,
     devices: [process.env.HIKVISION_IP1, process.env.HIKVISION_IP2].filter(Boolean),
     timeout: 30000,
-    updateInterval: 5 * 60 * 1000 // 5 minutos en milisegundos
+    updateInterval: 1 * 60 * 1000, // 1 minuto en milisegundos
+    // Horario permitido: 3 AM a 10 PM (15 horas activo, 9 horas inactivo)
+    startHour: 3,    // 3:00 AM
+    endHour: 22,     // 10:00 PM (22 en formato 24h)
+    activeHours: 19  // 19 horas de actividad (3 AM a 10 PM)
 };
 
 // Configuración PostgreSQL
@@ -31,10 +35,46 @@ const pool = new Pool(pgConfig);
 let isRunning = false;
 let lastRun = null;
 let nextRun = null;
+let schedulerInterval = null;
 
 // Utilidades optimizadas
 const formatHikvisionDate = (date) => date.toISOString().replace(/\.\d{3}Z$/, '');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Función para verificar si estamos dentro del horario permitido
+function isWithinAllowedHours() {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    
+    // Horario permitido: 3 AM (3) a 10 PM (22)
+    return currentHour >= CONFIG.startHour && currentHour < CONFIG.endHour;
+}
+
+// Función para calcular minutos hasta el próximo horario permitido
+function getMinutesUntilNextAllowedTime() {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    
+    if (isWithinAllowedHours()) {
+        // Ya estamos en horario permitido, ejecutar ahora
+        return 0;
+    }
+    
+    let nextAllowedTime = new Date(now);
+    
+    if (currentHour < CONFIG.startHour) {
+        // Estamos antes de las 3 AM, esperar hasta las 3 AM
+        nextAllowedTime.setHours(CONFIG.startHour, 0, 0, 0);
+    } else {
+        // Estamos después de las 10 PM, esperar hasta las 3 AM del siguiente día
+        nextAllowedTime.setDate(nextAllowedTime.getDate() + 1);
+        nextAllowedTime.setHours(CONFIG.startHour, 0, 0, 0);
+    }
+    
+    return Math.ceil((nextAllowedTime.getTime() - now.getTime()) / 60000); // minutos
+}
 
 // Logger optimizado para producción
 const logger = {
@@ -46,14 +86,39 @@ const logger = {
             console.log(`[${new Date().toLocaleTimeString('es-CO')}] 🐛 ${msg}`, ...args);
         }
     },
-    autoUpdate: () => {
+    scheduler: (status) => {
         const now = new Date();
-        const next = new Date(now.getTime() + CONFIG.updateInterval);
+        const currentHour = now.getHours();
+        const withinHours = isWithinAllowedHours();
+        const minutesUntilNext = getMinutesUntilNextAllowedTime();
+        
         console.log(`\n⏰ ========================================`);
-        console.log(`⏰ ACTUALIZACIÓN AUTOMÁTICA BIOMÉTRICA`);
+        console.log(`⏰ SCHEDULER BIOMÉTRICO CON HORARIO`);
+        console.log(`⏰ ========================================`);
+        console.log(`⏰ Horario activo: ${CONFIG.startHour}:00 - ${CONFIG.endHour}:00`);
+        console.log(`⏰ Hora actual: ${currentHour}:${String(now.getMinutes()).padStart(2, '0')}`);
+        console.log(`⏰ Estado: ${withinHours ? 'ACTIVO 🟢' : 'INACTIVO 🔴'}`);
+        
+        if (status === 'start') {
+            console.log(`⏰ Iniciando scheduler programado...`);
+            if (!withinHours) {
+                console.log(`⏰ ⏳ Esperando ${minutesUntilNext} minutos para horario permitido`);
+            }
+        }
+        
         console.log(`⏰ Última ejecución: ${lastRun ? lastRun.toLocaleTimeString('es-CO') : 'Nunca'}`);
-        console.log(`⏰ Próxima ejecución: ${next.toLocaleTimeString('es-CO')}`);
+        console.log(`⏰ Próxima ejecución: ${nextRun ? nextRun.toLocaleTimeString('es-CO') : 'Programando...'}`);
         console.log(`⏰ ========================================\n`);
+    },
+    horario: () => {
+        const withinHours = isWithinAllowedHours();
+        const minutesUntilNext = getMinutesUntilNextAllowedTime();
+        
+        if (withinHours) {
+            console.log(`🕒 SCHEDULER: Horario activo (${CONFIG.startHour}:00 - ${CONFIG.endHour}:00)`);
+        } else {
+            console.log(`🕒 SCHEDULER: Horario inactivo. Próxima ejecución en ${minutesUntilNext} minutos`);
+        }
     }
 };
 
@@ -229,7 +294,7 @@ function formatearEventosParaFrontend(registros) {
     });
 }
 
-// ==================== SCHEDULER AUTOMÁTICO ====================
+// ==================== SCHEDULER AUTOMÁTICO CON HORARIO ====================
 
 // Cliente Hikvision optimizado
 class HikvisionDebugClient {
@@ -358,8 +423,23 @@ function getDateRange(fechaStr) {
     return { inicio, fin };
 }
 
-// Función principal para actualizar datos
+// Función principal para actualizar datos con verificación de horario
 async function updateBiometricData(fechaEspecifica = null) {
+    // Verificar si estamos en horario permitido
+    if (!isWithinAllowedHours()) {
+        const now = new Date();
+        const currentHour = now.getHours();
+        const minutesUntilNext = getMinutesUntilNextAllowedTime();
+        
+        logger.info(`Fuera de horario permitido (${currentHour}:00). Próxima ejecución en ${minutesUntilNext} minutos`);
+        return {
+            success: false,
+            message: `Fuera de horario permitido (${CONFIG.startHour}:00 - ${CONFIG.endHour}:00)`,
+            currentHour: currentHour,
+            nextExecutionIn: `${minutesUntilNext} minutos`
+        };
+    }
+
     if (isRunning) {
         logger.info("Actualización ya en progreso, omitiendo...");
         return { success: false, message: "Ya se está ejecutando" };
@@ -369,7 +449,7 @@ async function updateBiometricData(fechaEspecifica = null) {
     const startTime = Date.now();
 
     try {
-        logger.autoUpdate();
+        logger.horario();
 
         // Determinar rango de tiempo
         let rango;
@@ -809,7 +889,7 @@ async function handleBiometricRequest(request) {
         const fecha = url.searchParams.get('fecha');
         const force = url.searchParams.get('force') === 'true';
 
-        // Acción especial: forzar actualización
+        // Acción especial: forzar actualización (ignora horario)
         if (action === 'force-update') {
             const result = await updateBiometricData(fecha);
             return NextResponse.json({
@@ -819,7 +899,9 @@ async function handleBiometricRequest(request) {
                 scheduler: {
                     isRunning,
                     lastRun: lastRun?.toISOString(),
-                    nextRun: nextRun?.toISOString()
+                    nextRun: nextRun?.toISOString(),
+                    withinAllowedHours: isWithinAllowedHours(),
+                    allowedHours: `${CONFIG.startHour}:00 - ${CONFIG.endHour}:00`
                 }
             });
         }
@@ -833,11 +915,19 @@ async function handleBiometricRequest(request) {
                     lastRun: lastRun?.toISOString(),
                     nextRun: nextRun?.toISOString(),
                     updateInterval: CONFIG.updateInterval,
-                    nextRunIn: nextRun ? Math.max(0, nextRun.getTime() - Date.now()) : null
+                    nextRunIn: nextRun ? Math.max(0, nextRun.getTime() - Date.now()) : null,
+                    withinAllowedHours: isWithinAllowedHours(),
+                    allowedHours: `${CONFIG.startHour}:00 - ${CONFIG.endHour}:00`,
+                    currentTime: new Date().toISOString(),
+                    minutesUntilNextAllowedTime: getMinutesUntilNextAllowedTime()
                 },
                 config: {
                     devices: CONFIG.devices,
-                    totalDevices: CONFIG.devices.length
+                    totalDevices: CONFIG.devices.length,
+                    schedule: {
+                        activeHours: `${CONFIG.startHour}:00 - ${CONFIG.endHour}:00`,
+                        inactiveHours: `${CONFIG.endHour}:00 - ${CONFIG.startHour}:00 (+1 día)`
+                    }
                 }
             });
         }
@@ -921,7 +1011,9 @@ async function handleBiometricRequest(request) {
             scheduler: {
                 isRunning,
                 lastRun: lastRun?.toISOString(),
-                nextRun: nextRun?.toISOString()
+                nextRun: nextRun?.toISOString(),
+                withinAllowedHours: isWithinAllowedHours(),
+                allowedHours: `${CONFIG.startHour}:00 - ${CONFIG.endHour}:00`
             }
         });
 
@@ -938,18 +1030,19 @@ async function handleBiometricRequest(request) {
 export async function POST(request) {
     try {
         const body = await request.json();
-        const { fecha, forceUpdate = false } = body;
+        const { fecha, forceUpdate = false, ignoreSchedule = false } = body;
 
-        if (forceUpdate) {
+        // Si es forceUpdate o ignoreSchedule, ignorar horario
+        if (forceUpdate || ignoreSchedule) {
             const result = await updateBiometricData(fecha);
             return NextResponse.json({
                 success: result.success,
-                message: "Actualización forzada vía POST",
+                message: "Actualización forzada vía POST (ignorando horario)",
                 data: result
             });
         }
 
-        // Por defecto, consultar día actual
+        // Por defecto, consultar día actual respetando horario
         const result = await updateBiometricData(fecha);
 
         return NextResponse.json({
@@ -1026,7 +1119,11 @@ export async function PUT(request) {
             success: true,
             action: action,
             data: result.rows,
-            count: result.rowCount
+            count: result.rowCount,
+            schedulerStatus: {
+                withinAllowedHours: isWithinAllowedHours(),
+                allowedHours: `${CONFIG.startHour}:00 - ${CONFIG.endHour}:00`
+            }
         });
 
     } catch (error) {
@@ -1038,24 +1135,56 @@ export async function PUT(request) {
     }
 }
 
-// ==================== INICIAR SCHEDULER AUTOMÁTICO ====================
+// ==================== INICIAR SCHEDULER AUTOMÁTICO CON HORARIO ====================
 
 if (typeof global.schedulerStarted === 'undefined') {
     global.schedulerStarted = true;
 
+    // Función para ejecutar el scheduler con verificación de horario
+    function runSchedulerWithSchedule() {
+        if (isWithinAllowedHours()) {
+            // Ejecutar si estamos en horario permitido
+            updateBiometricData().catch(error => {
+                logger.error(`Error en ejecución programada: ${error.message}`);
+            });
+        } else {
+            // Solo loguear fuera de horario (no ejecutar)
+            const now = new Date();
+            const currentHour = now.getHours();
+            const minutesUntilNext = getMinutesUntilNextAllowedTime();
+            
+            if (minutesUntilNext < 5) {
+                // Si estamos cerca del horario (menos de 5 minutos), loguear
+                logger.info(`Scheduler en pausa. Hora actual: ${currentHour}:00. Reanuda en ${minutesUntilNext} minutos`);
+            }
+        }
+    }
+
     // Esperar a que la app inicie
     setTimeout(() => {
-        logger.autoUpdate();
+        logger.scheduler('start');
 
-        // Ejecutar inmediatamente
-        updateBiometricData().catch(console.error);
-
-        // Programar ejecuciones periódicas
-        setInterval(() => {
+        // Ejecutar inmediatamente si estamos en horario permitido
+        if (isWithinAllowedHours()) {
             updateBiometricData().catch(console.error);
-        }, CONFIG.updateInterval);
+        } else {
+            const minutesUntilNext = getMinutesUntilNextAllowedTime();
+            logger.info(`Esperando ${minutesUntilNext} minutos para horario permitido...`);
+        }
 
-        logger.success(`Scheduler iniciado: Actualización cada ${CONFIG.updateInterval / 60000} minutos`);
+        // Programar ejecuciones periódicas CADA 1 MINUTO
+        schedulerInterval = setInterval(() => {
+            runSchedulerWithSchedule();
+        }, CONFIG.updateInterval); // 1 minuto = 60000ms
+
+        logger.success(`Scheduler con horario iniciado: ${CONFIG.startHour}:00 - ${CONFIG.endHour}:00`);
+        logger.success(`Actualización cada ${CONFIG.updateInterval / 60000} minutos durante horario activo`);
+
+        // También programar un check diario para logs de estado
+        setInterval(() => {
+            logger.horario();
+        }, 30 * 60 * 1000); // Log cada 30 minutos
+
     }, 10000); // Esperar 10 segundos al inicio
 }
 
