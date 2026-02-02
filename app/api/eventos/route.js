@@ -744,6 +744,58 @@ async function handleEventosPageRequest(request) {
         }, { status: 500 });
     }
 }
+// Agrega este handler en tu route.js
+async function handleDebugRequest(request) {
+    try {
+        const url = new URL(request.url);
+        const fecha = url.searchParams.get('fecha');
+        
+        // Consulta SQL directa
+        const query = `
+            SELECT 
+                documento, 
+                nombre, 
+                fecha,
+                hora_entrada, 
+                hora_salida, 
+                hora_salida_almuerzo, 
+                hora_entrada_almuerzo,
+                COUNT(*) as total,
+                SUM(CASE WHEN hora_entrada IS NOT NULL THEN 1 ELSE 0 END) as con_entrada,
+                SUM(CASE WHEN hora_salida IS NOT NULL THEN 1 ELSE 0 END) as con_salida,
+                SUM(CASE WHEN hora_salida_almuerzo IS NOT NULL THEN 1 ELSE 0 END) as con_salida_almuerzo,
+                SUM(CASE WHEN hora_entrada_almuerzo IS NOT NULL THEN 1 ELSE 0 END) as con_entrada_almuerzo
+            FROM eventos_procesados 
+            WHERE fecha = $1
+            GROUP BY documento, nombre, fecha, 
+                     hora_entrada, hora_salida, 
+                     hora_salida_almuerzo, hora_entrada_almuerzo
+            ORDER BY documento;
+        `;
+        
+        const result = await pool.query(query, [fecha]);
+        
+        return NextResponse.json({
+            success: true,
+            fecha: fecha,
+            totalRegistros: result.rows.length,
+            registros: result.rows,
+            analisis: {
+                totalPersonas: new Set(result.rows.map(r => r.documento)).size,
+                conEntrada: result.rows.filter(r => r.hora_entrada).length,
+                conSalida: result.rows.filter(r => r.hora_salida).length,
+                completos: result.rows.filter(r => r.hora_entrada && r.hora_salida).length,
+                incompletos: result.rows.filter(r => !r.hora_entrada || !r.hora_salida).length
+            }
+        });
+        
+    } catch (error) {
+        return NextResponse.json({
+            success: false,
+            error: error.message
+        }, { status: 500 });
+    }
+}
 
 // Handler para peticiones del debug-biometrico
 async function handleBiometricRequest(request) {
@@ -885,6 +937,10 @@ export async function GET(request) {
 
         if (pathname.includes('/bd') || url.searchParams.get('rango')) {
             return await handleEventosPageRequest(request);
+        }
+        
+        if (url.searchParams.get('debug') === 'true') {
+            return await handleDebugRequest(request);
         }
 
         return await handleBiometricRequest(request);
