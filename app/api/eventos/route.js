@@ -529,7 +529,7 @@ async function saveEventsToPostgreSQL(eventsByDevice) {
                 : 'multiple';
 
             const query = `
-                INSERT INTO eventos_procesados (
+                INSERT INTO attendance_events (
                     documento, nombre, fecha, 
                     hora_entrada, hora_salida, 
                     hora_salida_almuerzo, hora_entrada_almuerzo,
@@ -537,19 +537,19 @@ async function saveEventsToPostgreSQL(eventsByDevice) {
                 ) VALUES ($1, $2, $3, $4::time, $5::time, $6::time, $7::time, $8, $9, $10)
                 ON CONFLICT (documento, fecha)
                 DO UPDATE SET
-                    hora_entrada = COALESCE(EXCLUDED.hora_entrada::time, eventos_procesados.hora_entrada),
-                    hora_salida = COALESCE(EXCLUDED.hora_salida::time, eventos_procesados.hora_salida),
-                    hora_salida_almuerzo = COALESCE(EXCLUDED.hora_salida_almuerzo::time, eventos_procesados.hora_salida_almuerzo),
-                    hora_entrada_almuerzo = COALESCE(EXCLUDED.hora_entrada_almuerzo::time, eventos_procesados.hora_entrada_almuerzo),
-                    nombre = COALESCE(EXCLUDED.nombre, eventos_procesados.nombre),
+                    hora_entrada = COALESCE(EXCLUDED.hora_entrada::time, attendance_events.hora_entrada),
+                    hora_salida = COALESCE(EXCLUDED.hora_salida::time, attendance_events.hora_salida),
+                    hora_salida_almuerzo = COALESCE(EXCLUDED.hora_salida_almuerzo::time, attendance_events.hora_salida_almuerzo),
+                    hora_entrada_almuerzo = COALESCE(EXCLUDED.hora_entrada_almuerzo::time, attendance_events.hora_entrada_almuerzo),
+                    nombre = COALESCE(EXCLUDED.nombre, attendance_events.nombre),
                     dispositivo_ip = CASE 
-                        WHEN eventos_procesados.dispositivo_ip = 'multiple' THEN 'multiple'
+                        WHEN attendance_events.dispositivo_ip = 'multiple' THEN 'multiple'
                         WHEN EXCLUDED.dispositivo_ip = 'multiple' THEN 'multiple'
-                        WHEN eventos_procesados.dispositivo_ip != EXCLUDED.dispositivo_ip THEN 'multiple'
-                        ELSE COALESCE(EXCLUDED.dispositivo_ip, eventos_procesados.dispositivo_ip)
+                        WHEN attendance_events.dispositivo_ip != EXCLUDED.dispositivo_ip THEN 'multiple'
+                        ELSE COALESCE(EXCLUDED.dispositivo_ip, attendance_events.dispositivo_ip)
                     END,
-                    campaña = COALESCE(EXCLUDED.campaña, eventos_procesados.campaña),
-                    "imagen" = COALESCE(EXCLUDED."imagen", eventos_procesados."imagen")
+                    campaña = COALESCE(EXCLUDED.campaña, attendance_events.campaña),
+                    "imagen" = COALESCE(EXCLUDED."imagen", attendance_events."imagen")
                 RETURNING id;
             `;
 
@@ -677,7 +677,7 @@ async function handleEventosPageRequest(request) {
                    hora_entrada, hora_salida, 
                    hora_salida_almuerzo, hora_entrada_almuerzo,
                    dispositivo_ip, campaña, imagen
-            FROM eventos_procesados 
+            FROM attendance_events 
             WHERE 1=1
         `;
 
@@ -765,7 +765,7 @@ async function handleDebugRequest(request) {
                 SUM(CASE WHEN hora_salida IS NOT NULL THEN 1 ELSE 0 END) as con_salida,
                 SUM(CASE WHEN hora_salida_almuerzo IS NOT NULL THEN 1 ELSE 0 END) as con_salida_almuerzo,
                 SUM(CASE WHEN hora_entrada_almuerzo IS NOT NULL THEN 1 ELSE 0 END) as con_entrada_almuerzo
-            FROM eventos_procesados 
+            FROM attendance_events 
             WHERE fecha = $1
             GROUP BY documento, nombre, fecha, 
                      hora_entrada, hora_salida, 
@@ -1003,7 +1003,7 @@ export async function PUT(request) {
                         MIN(fecha) as primer_registro,
                         MAX(fecha) as ultimo_registro,
                         COUNT(CASE WHEN dispositivo_ip = 'multiple' THEN 1 END) as registros_multidispositivo
-                    FROM eventos_procesados
+                    FROM attendance_events
                     WHERE fecha >= CURRENT_DATE - INTERVAL '7 days';
                 `;
                 break;
@@ -1015,7 +1015,7 @@ export async function PUT(request) {
                         hora_entrada, hora_salida,
                         hora_salida_almuerzo, hora_entrada_almuerzo,
                         dispositivo_ip
-                    FROM eventos_procesados 
+                    FROM attendance_events 
                     WHERE fecha = CURRENT_DATE
                     ORDER BY documento;
                 `;
@@ -1025,7 +1025,7 @@ export async function PUT(request) {
                 query = `
                     SELECT documento, nombre, fecha, 
                            hora_entrada, hora_salida, dispositivo_ip
-                    FROM eventos_procesados 
+                    FROM attendance_events 
                     ORDER BY fecha DESC, documento
                     LIMIT $1;
                 `;

@@ -257,14 +257,14 @@ async function updateUserInHikvision(device, userData) {
 }
 
 // FUNCIÓN PARA ACTUALIZAR EN BASE DE DATOS
-// USANDO SOLO LAS COLUMNAS QUE EXISTEN EN usuarios_hikvision
+// USANDO SOLO LAS COLUMNAS QUE EXISTEN EN hikvision_users
 async function updateUserInDatabase(userData) {
   try {
     console.log(`🗄️ Actualizando en base de datos: ${userData.employeeNo}`);
     
     // Buscar si el usuario ya existe
     const searchQuery = `
-      SELECT id FROM usuarios_hikvision 
+      SELECT id FROM hikvision_users 
       WHERE employee_no = $1 
       LIMIT 1
     `;
@@ -277,7 +277,7 @@ async function updateUserInDatabase(userData) {
     if (searchResult.rows.length === 0) {
       // Crear nuevo usuario - solo con columnas existentes
       const insertQuery = `
-        INSERT INTO usuarios_hikvision (
+        INSERT INTO hikvision_users (
           employee_no, 
           nombre, 
           departamento, 
@@ -302,7 +302,7 @@ async function updateUserInDatabase(userData) {
     } else {
       // Actualizar usuario existente - solo columnas existentes
       const updateQuery = `
-        UPDATE usuarios_hikvision 
+        UPDATE hikvision_users 
         SET 
           nombre = $1,
           departamento = $2,
@@ -508,7 +508,7 @@ export async function GET() {
         genero: "string (opcional, 'Masculino'/'Femenino')",
         estado: "string (opcional, 'Activo'/'Inactivo')"
       },
-      note: "Nota: La tabla usuarios_hikvision no tiene columna 'numero_empleado'"
+      note: "Nota: La tabla hikvision_users no tiene columna 'numero_empleado'"
     }
   });
 }

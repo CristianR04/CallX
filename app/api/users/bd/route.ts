@@ -155,7 +155,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const deptCheckQuery = `SELECT DISTINCT departamento FROM usuarios_hikvision WHERE departamento IS NOT NULL ORDER BY departamento`;
+    const deptCheckQuery = `SELECT DISTINCT departamento FROM hikvision_users WHERE departamento IS NOT NULL ORDER BY departamento`;
     const deptCheckResult = await pool.query(deptCheckQuery);
     const existingDepartments = deptCheckResult.rows.map(r => r.departamento);
 
@@ -171,7 +171,7 @@ export async function GET(request: NextRequest) {
         fecha_creacion as "createdAt",
         fecha_modificacion as "updatedAt",
         estado
-      FROM usuarios_hikvision
+      FROM hikvision_users
       WHERE 1=1
     `;
     
@@ -249,7 +249,7 @@ export async function GET(request: NextRequest) {
       };
     });
     
-    let countQuery = `SELECT COUNT(*) as total FROM usuarios_hikvision WHERE 1=1`;
+    let countQuery = `SELECT COUNT(*) as total FROM hikvision_users WHERE 1=1`;
     let countParams: any[] = [];
 
     if (userDepartments.length > 0) {
