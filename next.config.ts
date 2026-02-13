@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       {
@@ -19,6 +18,7 @@ const nextConfig = {
     ],
     unoptimized: true,
   },
+  devIndicators: false, 
 
   // Agregar para evitar problemas CORS
   async headers() {
@@ -36,5 +36,4 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
 export default nextConfig;

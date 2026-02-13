@@ -90,12 +90,7 @@ async function deleteUserFromDevice(device, employeeNo) {
       disableRetry: false,
       algorithm: 'MD5'
     });
-
-    // Deshabilitar verificación SSL para HTTPS (solo desarrollo)
-    const originalRejectUnauthorized = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    if (device.protocol === 'https') {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-    }
+    
 
     // Formatos de API para Hikvision
     const formats = [
@@ -142,10 +137,6 @@ async function deleteUserFromDevice(device, employeeNo) {
         });
 
         if (response.status === 200 || response.status === 204) {
-          // Restaurar verificación SSL
-          if (device.protocol === 'https') {
-            process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
-          }
           
           return {
             success: true,
@@ -158,11 +149,6 @@ async function deleteUserFromDevice(device, employeeNo) {
         }
         
         if (response.status === 404) {
-          // Restaurar verificación SSL
-          if (device.protocol === 'https') {
-            process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
-          }
-          
           return {
             success: true,
             message: "Usuario no encontrado (posiblemente ya fue eliminado)",
@@ -174,18 +160,10 @@ async function deleteUserFromDevice(device, employeeNo) {
           };
         }
         
-        // Restaurar verificación SSL antes de continuar
-        if (device.protocol === 'https') {
-          process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
-        }
         
       } catch (error) {
         console.log(`❌ Error en formato ${format.method}:`, error.message);
         
-        // Restaurar verificación SSL si hubo error
-        if (device.protocol === 'https') {
-          process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
-        }
       }
       
       await new Promise(resolve => setTimeout(resolve, 300));

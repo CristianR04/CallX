@@ -141,12 +141,6 @@ async function updateUserInHikvision(device, userData) {
       algorithm: 'MD5'
     });
 
-    // Deshabilitar verificación SSL para HTTPS (solo desarrollo)
-    const originalRejectUnauthorized = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    if (device.protocol === 'https') {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-    }
-
     // Obtener department_id
     const departmentId = getDepartmentId(userData.departamento);
     
@@ -199,11 +193,6 @@ async function updateUserInHikvision(device, userData) {
 
     const responseText = await response.text();
     
-    // Restaurar verificación SSL
-    if (device.protocol === 'https') {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
-    }
-    
     console.log(`📥 Respuesta de ${device.ip}:`, {
       status: response.status,
       statusText: response.statusText
@@ -239,11 +228,6 @@ async function updateUserInHikvision(device, userData) {
 
   } catch (error) {
     console.error(`💥 ERROR GENERAL EN ${device.ip}:`, error);
-    
-    // Restaurar verificación SSL si hubo error
-    if (device.protocol === 'https') {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
-    }
     
     return {
       success: false,
